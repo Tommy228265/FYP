@@ -1,0 +1,38 @@
+# 创建对齐器 (将深度对齐到彩色)
+align_to = rs.stream.color
+align = rs.align(align_to)
+ 
+try:
+    while True:
+        # 等待一组连贯的帧
+        frames = pipeline.wait_for_frames()
+        
+        # 对齐深度帧到彩色帧
+        aligned_frames = align.process(frames)
+        
+        # 获取对齐后的帧
+        color_frame = aligned_frames.get_color_frame()
+        depth_frame = aligned_frames.get_depth_frame()
+        
+        if not color_frame or not depth_frame:
+            continue
+            
+        # 转换为numpy数组
+        color_image = np.asanyarray(color_frame.get_data())
+        depth_image = np.asanyarray(depth_frame.get_data())
+        
+        # 应用颜色映射到深度图像
+        depth_colormap = cv2.applyColorMap(
+            cv2.convertScaleAbs(depth_image, alpha=0.03), 
+            cv2.COLORMAP_JET
+        )
+        
+        # 水平堆叠显示
+        images = np.hstack((color_image, depth_colormap))
+        cv2.imshow('RealSense', images)
+        
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+finally:
+    pipeline.stop()
+    cv2.destroyAllWindows()

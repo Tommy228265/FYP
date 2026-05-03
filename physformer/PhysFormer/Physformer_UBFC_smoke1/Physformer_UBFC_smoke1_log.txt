@@ -1,0 +1,65 @@
+subjects=32 train_clips=621 val_subj=6 val_clips=72
+pretrained=c:\Users\gsnlk\Desktop\FYP\weights\Physformer_VIPL_fold1.pkl
+epoch:1, batch:  5, lr=0.000100, NegPearson=1.1490, kl=3.4729, fre=4.8911, hr_mae=2.8916
+epoch:1, batch: 10, lr=0.000100, NegPearson=1.0271, kl=3.4705, fre=4.8886, hr_mae=3.0680
+epoch:1, batch: 15, lr=0.000100, NegPearson=1.0360, kl=3.4701, fre=4.8883, hr_mae=3.0309
+epoch:1, batch: 20, lr=0.000100, NegPearson=1.0237, kl=3.4705, fre=4.8886, hr_mae=2.9890
+epoch:1, batch: 25, lr=0.000100, NegPearson=0.9587, kl=3.4703, fre=4.8885, hr_mae=3.0157
+epoch:1, batch: 30, lr=0.000100, NegPearson=0.9206, kl=3.4698, fre=4.8879, hr_mae=2.9678
+epoch:1, batch: 35, lr=0.000100, NegPearson=0.8828, kl=3.4703, fre=4.8885, hr_mae=3.0238
+epoch:1, batch: 40, lr=0.000100, NegPearson=0.8597, kl=3.4703, fre=4.8885, hr_mae=2.9265
+epoch:1, batch: 45, lr=0.000100, NegPearson=0.8331, kl=3.4712, fre=4.8894, hr_mae=3.0928
+epoch:1, batch: 50, lr=0.000100, NegPearson=0.8123, kl=3.4715, fre=4.8897, hr_mae=3.1366
+epoch:1, batch: 55, lr=0.000100, NegPearson=0.7988, kl=3.4716, fre=4.8898, hr_mae=3.8068
+epoch:1, batch: 60, lr=0.000100, NegPearson=0.7836, kl=3.4713, fre=4.8895, hr_mae=3.7220
+epoch:1, batch: 65, lr=0.000100, NegPearson=0.7712, kl=3.4712, fre=4.8894, hr_mae=3.6364
+epoch:1, batch: 70, lr=0.000100, NegPearson=0.7515, kl=3.4707, fre=4.8889, hr_mae=3.5192
+epoch:1, batch: 75, lr=0.000100, NegPearson=0.7547, kl=3.4707, fre=4.8889, hr_mae=3.6081
+epoch:1, batch: 80, lr=0.000100, NegPearson=0.7531, kl=3.4706, fre=4.8888, hr_mae=3.5583
+epoch:1, batch: 85, lr=0.000100, NegPearson=0.7473, kl=3.4704, fre=4.8886, hr_mae=3.5237
+epoch:1, batch: 90, lr=0.000100, NegPearson=0.7522, kl=3.4702, fre=4.8884, hr_mae=3.4680
+epoch:1, batch: 95, lr=0.000100, NegPearson=0.7538, kl=3.4701, fre=4.8882, hr_mae=3.4254
+epoch:1, batch:100, lr=0.000100, NegPearson=0.7551, kl=3.4703, fre=4.8885, hr_mae=3.4409
+epoch:1, batch:105, lr=0.000100, NegPearson=0.7503, kl=3.4705, fre=4.8887, hr_mae=3.4082
+epoch:1, batch:110, lr=0.000100, NegPearson=0.7509, kl=3.4703, fre=4.8885, hr_mae=3.3770
+epoch:1, batch:115, lr=0.000100, NegPearson=0.7452, kl=3.4707, fre=4.8889, hr_mae=3.4024
+epoch:1, batch:120, lr=0.000100, NegPearson=0.7364, kl=3.4705, fre=4.8887, hr_mae=3.3685
+epoch:1, batch:125, lr=0.000100, NegPearson=0.7354, kl=3.4705, fre=4.8886, hr_mae=3.3480
+epoch:1, batch:130, lr=0.000100, NegPearson=0.7253, kl=3.4704, fre=4.8886, hr_mae=3.3272
+epoch:1, batch:135, lr=0.000100, NegPearson=0.7156, kl=3.4705, fre=4.8887, hr_mae=3.3291
+epoch:1, batch:140, lr=0.000100, NegPearson=0.7128, kl=3.4707, fre=4.8889, hr_mae=3.3395
+epoch:1, batch:145, lr=0.000100, NegPearson=0.7097, kl=3.4709, fre=4.8891, hr_mae=3.3490
+epoch:1, batch:150, lr=0.000100, NegPearson=0.7042, kl=3.4707, fre=4.8889, hr_mae=3.2933
+epoch:1, batch:155, lr=0.000100, NegPearson=0.7028, kl=3.4708, fre=4.8890, hr_mae=3.2875
+epoch:1, batch:160, lr=0.000100, NegPearson=0.6975, kl=3.4707, fre=4.8889, hr_mae=3.2600
+epoch:1, batch:165, lr=0.000100, NegPearson=0.6953, kl=3.4706, fre=4.8888, hr_mae=3.2437
+epoch:1, batch:170, lr=0.000100, NegPearson=0.6957, kl=3.4710, fre=4.8892, hr_mae=3.5320
+epoch:1, batch:175, lr=0.000100, NegPearson=0.6923, kl=3.4711, fre=4.8893, hr_mae=3.5248
+epoch:1, batch:180, lr=0.000100, NegPearson=0.6924, kl=3.4712, fre=4.8894, hr_mae=3.5250
+epoch:1, batch:185, lr=0.000100, NegPearson=0.6920, kl=3.4711, fre=4.8893, hr_mae=3.5116
+epoch:1, batch:190, lr=0.000100, NegPearson=0.6867, kl=3.4712, fre=4.8894, hr_mae=3.5183
+epoch:1, batch:195, lr=0.000100, NegPearson=0.6828, kl=3.4713, fre=4.8895, hr_mae=3.5244
+epoch:1, batch:200, lr=0.000100, NegPearson=0.6834, kl=3.4714, fre=4.8896, hr_mae=3.5372
+epoch:1, batch:205, lr=0.000100, NegPearson=0.6804, kl=3.4713, fre=4.8895, hr_mae=3.5099
+epoch:1, batch:210, lr=0.000100, NegPearson=0.6764, kl=3.4713, fre=4.8895, hr_mae=3.4951
+epoch:1, batch:215, lr=0.000100, NegPearson=0.6714, kl=3.4713, fre=4.8896, hr_mae=3.4787
+epoch:1, batch:220, lr=0.000100, NegPearson=0.6731, kl=3.4714, fre=4.8896, hr_mae=3.4761
+epoch:1, batch:225, lr=0.000100, NegPearson=0.6697, kl=3.4715, fre=4.8897, hr_mae=3.4877
+epoch:1, batch:230, lr=0.000100, NegPearson=0.6672, kl=3.4715, fre=4.8897, hr_mae=3.4740
+epoch:1, batch:235, lr=0.000100, NegPearson=0.6626, kl=3.4717, fre=4.8900, hr_mae=3.5401
+epoch:1, batch:240, lr=0.000100, NegPearson=0.6616, kl=3.4717, fre=4.8899, hr_mae=3.5260
+epoch:1, batch:245, lr=0.000100, NegPearson=0.6576, kl=3.4717, fre=4.8900, hr_mae=3.5220
+epoch:1, batch:250, lr=0.000100, NegPearson=0.6544, kl=3.4718, fre=4.8900, hr_mae=3.5104
+epoch:1, batch:255, lr=0.000100, NegPearson=0.6514, kl=3.4719, fre=4.8902, hr_mae=3.5049
+epoch:1, batch:260, lr=0.000100, NegPearson=0.6471, kl=3.4720, fre=4.8903, hr_mae=3.5106
+epoch:1, batch:265, lr=0.000100, NegPearson=0.6438, kl=3.4720, fre=4.8903, hr_mae=3.4919
+epoch:1, batch:270, lr=0.000100, NegPearson=0.6417, kl=3.4722, fre=4.8905, hr_mae=3.5333
+epoch:1, batch:275, lr=0.000100, NegPearson=0.6398, kl=3.4723, fre=4.8906, hr_mae=3.5337
+epoch:1, batch:280, lr=0.000100, NegPearson=0.6382, kl=3.4724, fre=4.8906, hr_mae=3.5232
+epoch:1, batch:285, lr=0.000100, NegPearson=0.6384, kl=3.4724, fre=4.8906, hr_mae=3.5148
+epoch:1, batch:290, lr=0.000100, NegPearson=0.6384, kl=3.4725, fre=4.8908, hr_mae=3.5317
+epoch:1, batch:295, lr=0.000100, NegPearson=0.6399, kl=3.4725, fre=4.8907, hr_mae=3.5268
+epoch:1, batch:300, lr=0.000100, NegPearson=0.6390, kl=3.4725, fre=4.8907, hr_mae=3.5230
+epoch:1, batch:305, lr=0.000100, NegPearson=0.6410, kl=3.4725, fre=4.8908, hr_mae=3.5201
+epoch:1, batch:310, lr=0.000100, NegPearson=0.6380, kl=3.4725, fre=4.8907, hr_mae=3.5083
+epoch 1 val_hr_mae 4.2196

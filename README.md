@@ -1,0 +1,305 @@
+# FYP：Intel RealSense D435 人体检测与多人脸识别
+
+本项目基于 **Intel RealSense D435** 彩色与深度流，结合 **YOLOv8** 做人体检测、**深度 ROI 中值** 估计距离，并通过 **Web 页面** 完成最多 **10 个面容档案** 的录入、删除、重复面容检测与身份识别。配置集中在 `config.py`，便于实验与论文中复现实验参数。
+
+---
+
+## 功能概览
+
+| 模块 | 作用 |
+|------|------|
+| `test.py` | 本地 OpenCV 窗口：YOLO 检测行人、简单 IoU 追踪、人体框内深度中值、彩色/深度可视化 |
+| `face_app.py` + `templates/index.html` | Flask Web：视频流、最多 10 个面容录入/删除、重复检测、识别模式、显示相似度、深度与年龄段 |
+| `face_identity.py` | MTCNN 人脸检测与对齐 + InceptionResnetV1 提取 512 维嵌入（Facenet 路线） |
+| `age_estimator.py` | EfficientNet-B0 年龄段分类推理（加载训练好的本地权重） |
+| `train_age_model.py` | 基于 UTKFace/FairFace 训练年龄段分类模型 |
+| `realsense_utils.py` | 深度缩放与 ROI 内有效深度中值（米） |
+| `config.py` | 分辨率、YOLO、追踪、深度与人脸相关超参数 |
+
+
+---
+
+## 环境与依赖
+
+- **硬件**：Intel RealSense D435（USB3），安装 [Intel RealSense SDK 2.0](https://github.com/IntelRealSense/librealsense) 及对应 Python 包 `pyrealsense2`。
+- **Python**：建议使用独立 Conda 环境（例如 `realsense`）。
+- **主要依赖**（按需安装）：
+
+```text
+pyrealsense2
+opencv-python
+numpy
+ultralytics          # YOLO
+torch / torchvision  # ultralytics 与 facenet-pytorch 已依赖
+facenet-pytorch      # 人脸检测+嵌入
+flask                # Web 服务
+```
+
+首次运行 YOLO 会下载 `yolov8n.pt`（或你配置的模型）；首次运行 Facenet 会下载 **MTCNN** 与 **InceptionResnetV1（vggface2）** 预训练权重，请保持网络可用。
+
+---
+
+## 项目结构
+
+```text
+FYP/
+├── config.py              # 全局配置
+├── test.py                # 人体检测 + 深度（OpenCV）
+├── face_app.py            # Web 人脸录入与识别
+├── face_identity.py       # 人脸嵌入引擎
+├── age_estimator.py       # 年龄段估计推理
+├── train_age_model.py     # 年龄段模型训练脚本
+├── realsense_utils.py     # 深度工具函数
+├── templates/
+│   └── index.html         # Web 前端页面
+├── yolov8n.pt             # YOLO 权重（首次运行后生成或下载）
+└── face_profiles_v2.npz   # 人脸特征档案（录入后生成）
+└── age_model_effnet_b0.pth # 年龄段模型权重（训练后生成）
+```
+
+### PhysFormer 心率模型（UBFC 微调 + 预训练权重）
+
+- **数据**：本机因存储限制仅保留 **部分** [UBFC-rPPG](https://sites.google.com/view/ybenezeth/ubfcrppg) 序列；当前使用目录 `datasets/UBFC-rPPG/`，其下每个 `subject*/` 需同时包含 `vid.avi` 与 `ground_truth.txt`（官方 DATASET_2 三行格式见数据集附带说明）。完整数据可从作者页面获取；论文中应说明**子集规模**与划分方式。
+- **预训练权重（规范声明）**：远程生理估计分支在 **PhysFormer 官方在 VIPL-HR 上训练得到的 fold1 权重** 上继续微调，**非**自研骨干随机初始化。权重文件名为 `Physformer_VIPL_fold1.pkl`，来源为 [ZitongYu/PhysFormer](https://github.com/ZitongYu/PhysFormer) README 中 Google Drive 链接；请下载后置于项目内 **`weights/Physformer_VIPL_fold1.pkl`**（该文件已加入 `.gitignore`，避免将大文件提交到 Git）。若需自动下载，可使用 `pip install gdown` 后：  
+  `gdown "https://drive.google.com/uc?id=1jBSbM88fA-beaoVi8ILFyL0SvVVMA9c9" -O weights/Physformer_VIPL_fold1.pkl`  
+- **训练脚本**：`physformer/PhysFormer/train_Physformer_160_UBFC.py`，在含 PyTorch+CUDA 的环境中执行，示例见下节「PhysFormer 训练命令」。
+- **实时推理（Web）**：`face_app.py` 通过 `physformer_engine.py` 懒加载 **UBFC 微调后的 `.pkl`**（默认自动查找 `weights/Physformer_UBFC_best.pkl`，亦可用环境变量 `PHYSFORMER_WEIGHTS` 指定；设 `PHYSFORMER_ENABLED=0` 可关闭）。对每路检测到的人脸维护 160 帧 RGB 小块，在 **GPU** 上估计心率并显示在画面与侧栏；**与树莓派毫米波**并列：视觉为**每人** rPPG 心率，雷达为**场景**呼吸/心率（需 `RADAR_PI_BASE`）。
+
+**引用（与 README 中预训练/数据一致时请在论文中列出）**：
+
+- PhysFormer 与预训练检查点：Yu et al., *PhysFormer: Facial Video-based Physiological Measurement with Temporal Difference Transformer*, CVPR, 2022.（BibTeX 见 [PhysFormer 仓库](https://github.com/ZitongYu/PhysFormer)）
+- PhysFormer++（若后续换用++ 权重）：Yu et al., IJCV, 2023.
+- VIPL-HR（预训练数据出处）：Niu et al., *RhythmNet...*, IEEE T-IP, 2019.（与官方预训练权重的训练集一致时引用。）
+- UBFC-rPPG（本机微调数据）：Bobbia et al., *Unsupervised skin tissue segmentation for remote photoplethysmography*, Pattern Recognition Letters, 2017.
+
+---
+
+## 实现细节
+
+### 1. RealSense 数据流
+
+- 彩色流与深度流均为 **640×480@30fps**，深度与彩色 **对齐到彩色**（`rs.align(rs.stream.color)`），保证检测框与深度图在同一像素坐标系下。
+- 深度原始值为 `uint16`，通过 `depth_sensor.get_depth_scale()` 转为米（与 `pyrealsense2` 文档一致）。
+
+### 2. `test.py`：人体检测与距离
+
+- **检测**：Ultralytics YOLOv8，仅 **person 类（class 0）**，置信度等见 `config.py`。
+- **追踪**：基于 IoU 的简易多目标关联，用于减轻帧间框抖动；`TRACK_*` 控制匹配阈值、丢失容忍与显示策略。
+- **距离**：在人体框内对 **有效深度像素** 取 **中值**（`realsense_utils.median_depth_meters`），避免单点深度跳变；无效时显示 `depth n/a`。
+- **显示**：彩色图叠加框与标签；深度图经颜色映射仅用于可视化。
+
+### 3. `face_app.py`：多人脸 Web 系统
+
+- **后端**：Flask；`/video_feed` 以 **MJPEG multipart** 推送 JPEG 帧；`/api/status` 的 JSON 字段 **`vitals`** 含 PhysFormer 每人 **心率与缓冲进度**（启用时）。
+- **前端**：`templates/index.html` 调用 `POST /api/enroll/start`、`/api/recognize/start`、`/api/stop`，轮询 `GET /api/status` 显示录入状态。
+- **流程**：
+  1. **录入**：按间隔采集 `ENROLL_SAMPLES_TARGET` 帧通过质量门控的嵌入，对嵌入做 **均值** 后再 **L2 归一化** 作为该人模板。
+  2. **重复检测**：新模板与已有人脸模板比较；若相似度高于 `FACE_DUPLICATE_THRESHOLD`，自动取消本次录入。
+  3. **识别**：当前帧嵌入与所有已录入模板计算 **余弦相似度**，取较大者；若低于 `FACE_RECOGNITION_THRESHOLD` 则判为 Unknown。
+- **质量门控**：MTCNN 人脸置信度 ≥ `FACE_MIN_MTCNN_PROB`；可选拉普拉斯方差 ≥ `FACE_MIN_BLUR_VARIANCE`（`0` 表示关闭模糊过滤）。
+- **深度**：在人脸框内同样用 **深度中值** 显示距离（米）。
+
+### 4. `face_identity.py`：人脸嵌入
+
+- **检测与对齐**：`facenet_pytorch.MTCNN`（`keep_all=True`），在检测框中选取 **面积最大** 的人脸。
+- **嵌入**：`InceptionResnetV1(pretrained='vggface2')`，输出 **512 维**，经 **L2 归一化** 后用于余弦相似度。
+- **说明**：未采用需 Windows MSVC 编译的 InsightFace C++ 扩展；在相同硬件下用 Facenet 路线更易部署，适合毕设原型与实验说明。
+
+### 5. `age_estimator.py`：年龄段估计
+
+- **模型**：EfficientNet-B0，使用 ImageNet 预训练权重后在年龄数据集上微调。
+- **类别**：采用更稳定的阶段型 5 类：儿童（0-12）、青少年（13-19）、青年（20-35）、中年（36-55）、老年（56+）。
+- **训练数据**：`train_age_model.py` 支持 UTKFace 文件名年龄标签，也支持 FairFace CSV 年龄段标签。
+- **运行行为**：若 `age_model_effnet_b0.pth` 不存在，Web 系统仍可正常识别人脸，但年龄段显示为“未加载”。
+- **验证方式**：录入面容时可填写真实年龄；识别时系统会比较预测年龄段与真实年龄所在年龄段，并显示“预测正确/预测错误”。
+- **场景校准**：考虑训练集人群与实际黄种人场景差异，系统会将模型输出年龄段自动上调一档。
+- **稳定输出**：年龄段结果使用最近 `AGE_SMOOTHING_WINDOW` 帧多数投票，减少单帧预测抖动。
+
+### 6. 档案文件 `face_profiles_v2.npz`
+
+- 保存字段：`version`（当前为 2）、`person1` 至 `person10`（各为 512 维 `float32` 向量，未录入则不保存）。
+- 旧版 HOG 等非 v2 格式不会自动载入，需**重新录入**。
+
+---
+
+## 运行方式
+
+### 人体检测 + 深度（OpenCV）
+
+```bash
+cd FYP
+conda activate realsense   # 或你的环境
+python test.py
+```
+
+- 图像窗口 **获得焦点** 后按 `q` / `Q` / `Esc` 退出；也可关闭窗口退出。
+
+### Web 人脸录入与识别
+
+```bash
+python face_app.py
+```
+
+浏览器访问：**http://127.0.0.1:5000**
+
+### PhysFormer 训练命令（UBFC 子集 + VIPL 预训练微调）
+
+```powershell
+conda activate realsense   # 或已安装 torch 的独立环境
+cd physformer\PhysFormer
+python train_Physformer_160_UBFC.py ^
+  --ubfc_root "..\..\datasets\UBFC-rPPG" ^
+  --pretrained "..\..\weights\Physformer_VIPL_fold1.pkl" ^
+  --gpu 0 --epochs 25 --log Physformer_UBFC_finetune
+```
+
+说明：`--ubfc_root` 指向包含若干 `subject*` 子文件夹的根目录；`--clip_stride` 可按显存与磁盘自行调整（见 `train_Physformer_160_UBFC.py` 参数）。
+
+- 至少完成 1 个面容录入后即可进入 **识别**；如需重新采集，可在对应人物卡片点击重新录入。
+- 录入前请在对应人物卡片填写真实年龄；该年龄仅保存在本地档案中，用于验证年龄段预测是否正确。
+- 终端 **Ctrl+C** 结束服务。
+
+### 训练年龄段模型
+
+使用 UTKFace：
+
+```bash
+python train_age_model.py --device cuda --epochs 16 --warmup-epochs 2 --batch-size 32 --num-workers 4
+```
+
+当前项目已将默认训练目录配置为 `UTKFace`。如需指定其他目录，可使用 `--utkface-root` 覆盖。
+
+使用 FairFace：
+
+```bash
+python train_age_model.py --device cuda --fairface-root path/to/fairface --fairface-csv path/to/fairface_label_train.csv --epochs 16 --warmup-epochs 2 --batch-size 32 --num-workers 4
+```
+
+训练完成后会生成 `age_model_effnet_b0.pth`，再次启动 `face_app.py` 即会自动加载。
+训练脚本会先冻结主干训练分类头，再解冻全模型微调，并输出普通准确率、相邻年龄段容错准确率和宏平均召回率。
+
+---
+
+## 配置说明（`config.py`）
+
+| 类别 | 关键参数 | 含义 |
+|------|-----------|------|
+| 相机 | `WIDTH`, `HEIGHT`, `FPS` | 流分辨率与帧率 |
+| YOLO | `YOLO_MODEL`, `YOLO_CONFIDENCE`, `YOLO_IMGSZ`, `YOLO_DEVICE` | 模型与推理设置 |
+| 追踪 | `TRACK_IOU_THRESHOLD`, `TRACK_MAX_MISSES`, `TRACK_DRAW_MAX_MISSES` | 简单追踪稳定性 |
+| 深度 | `DEPTH_VALID_MIN_M`, `DEPTH_VALID_MAX_M`, `DEPTH_MIN_VALID_PIXELS` | ROI 内参与中值统计的像素条件 |
+| 深度 | `DEPTH_VITAL_OPTIMAL_MIN_M`, `DEPTH_VITAL_OPTIMAL_MAX_M` | 推荐站位区间（米），用于 `depth_zone` 与界面提示 |
+| 深度 | `DEPTH_VIS_ALPHA` | 深度伪彩可视化缩放（仅显示，不影响测距） |
+| 融合 | `FUSION_DEPTH_SCENE_MIN_M`, `FUSION_DEPTH_SCENE_MAX_M` | 深度映射到雷达通道时的场景近/远界（米）；可被环境变量覆盖 |
+| 融合 | `FUSION_USE_DEPTH_BIN_MATCH` | 是否启用「深度→雷达距离门 id」贪心匹配（否则为名次配对） |
+| 雷达上位机 | `RADAR_PI_BASE` | 树莓派 `shumeipai.py` 的根 URL，供轮询 `/api/radar` 与页面代理 |
+| 人脸 | `FACE_RECOGNITION_THRESHOLD` | 识别相似度阈值（调高更严） |
+| 人脸 | `FACE_MAX_PROFILES`, `FACE_DUPLICATE_THRESHOLD` | 最大面容档案数与重复面容判定阈值 |
+| 人脸 | `FACE_MIN_MTCNN_PROB`, `FACE_MIN_BLUR_VARIANCE` | 检测与清晰度门控 |
+| 录入 | `ENROLL_SAMPLES_TARGET`, `ENROLL_SAMPLE_INTERVAL_SEC` | 采样帧数与间隔 |
+| 年龄 | `AGE_MODEL_FILE`, `AGE_INPUT_SIZE`, `AGE_CLASSES` | 年龄模型权重、输入尺寸与年龄段定义 |
+| 年龄 | `AGE_CALIBRATION_SHIFT`, `AGE_SMOOTHING_WINDOW` | 年龄段上调校准与多帧多数投票窗口 |
+| 年龄训练 | `AGE_TRAIN_UTKFACE_ROOT` | 默认 UTKFace 训练数据目录 |
+
+---
+
+## 伦理与数据
+
+- 人脸数据仅保存在本地 **`face_profiles_v2.npz`**，不向第三方上传。
+- 毕设论文中建议说明：数据用途、存储位置与删除方式。
+
+---
+
+## 常见问题
+
+- **按 `q` 无反应**：请先点击 **OpenCV 图像窗口** 再按键，焦点在终端时无法捕获。
+- **识别总为 Unknown**：可适当 **降低** `FACE_RECOGNITION_THRESHOLD`，或在光照稳定、正对镜头下重新录入。
+- **YOLO 很慢**：可将 `YOLO_IMGSZ` 调小，或在使用 NVIDIA GPU 时将 `YOLO_DEVICE` 设为 `0`。
+
+---
+
+## 小结
+
+本项目构成一套 **RGB-D 摄像头 +（可选）树莓派毫米波雷达** 的非接触式生命体征与人脸识别原型，适用于毕设演示与实验记录，**非医疗诊断用途**。
+
+- **视觉侧（上位机）**：Intel RealSense D435 提供 **彩色与深度对齐流**；在人脸 ROI 上估计 **深度中值（米）**、**有效深度占比**，并给出相对推荐站位的 **距离分区**（`depth_zone`）。Web 端并列展示 **RGB 与深度伪彩**（`/video_feed` 与 `/video_depth`）。人脸分支采用 Facenet 路线完成 **最多 10 人建档、识别与重复面容检测**；可选 **PhysFormer** 输出 **每人 rPPG 心率**，并以绿通道 FFT 提供 **辅助呼吸率**。
+- **雷达侧（树莓派）**：`shumeipai.py` 从串口读取相位剖面，经 **带通、谐波抑制、Hann 窗 FFT + 抛物线细化、自相关交叉校验与 EMA**，输出 **主通道** 及 **多距离门** 的呼吸/心率与质量指标；通过 HTTP **`/api/radar`** 提供给上位机，**不涉及修改本 README 未列出的串口协议时仅替换算法即可迭代**。
+- **跨模态融合**：`radar_fusion.py` 将 **深度排序** 与 **雷达通道** 对齐：默认按场景深度区间把人物映射到 **首选距离门 id**，再以贪心策略分配通道；融合输出 **视觉 HR/RR、雷达 HR/RR、加权融合值**，并对两路分歧做 **置信度软化**。相关可调参数见 `config.py`（如 `FUSION_DEPTH_SCENE_*`、`FUSION_USE_DEPTH_BIN_MATCH`、`RADAR_PI_BASE`）。
+- **论文撰写提示**：明确写出 **启发式前提**（深度↔雷达 bin 对应依赖场景与雷达安装）、**各模态局限**（光照、运动、多径）及 **与金标准设备的对比方法**（若有）。
+
+---
+
+## 深度相机参数与环境变量（答辩 / 复现）
+
+本节汇总 **RealSense 深度参与融合与界面** 时的可调项，并补充 **树莓派雷达服务**、**fyp_launcher 一键入口** 的环境变量，便于双机部署与答辩复现。相机底层分辨率仍为 `WIDTH`×`HEIGHT`@`FPS`，深度与彩色 **对齐到彩色**（见上文「实现细节」）。
+
+### `config.py` 中与深度直接相关的量
+
+| 符号 | 含义 |
+|------|------|
+| `DEPTH_VALID_MIN_M` / `DEPTH_VALID_MAX_M` | 人脸 ROI 内参与 **中值深度** 统计的有效深度范围（米） |
+| `DEPTH_MIN_VALID_PIXELS` | ROI 内至少多少个有效深度像素才认为测距可用 |
+| `DEPTH_VITAL_OPTIMAL_MIN_M` / `DEPTH_VITAL_OPTIMAL_MAX_M` | **推荐站位**区间；人脸深度落在此区间外时 `depth_zone` 为 `too_near` / `too_far` |
+| `DEPTH_VIS_ALPHA` | OpenCV 深度图转 8 位时的缩放系数，**仅影响伪彩显示**，不改变 `depth_m` 数值 |
+| `FUSION_DEPTH_SCENE_MIN_M` / `FUSION_DEPTH_SCENE_MAX_M` | 将场景深度 **线性映射** 到雷达多通道下标 `0…N-1` 时的 **近端 / 远端**（米）；需结合实验室布局调节 |
+| `FUSION_USE_DEPTH_BIN_MATCH` | `True`：按深度首选通道 id + **贪心分配**；`False`：退回「按深度排序名次 ↔ 雷达通道名次」 |
+
+### 可通过环境变量覆盖的项（上位机）
+
+在启动 `face_app.py` 前设置（Linux/macOS 用 `export`，Windows PowerShell 用 `$env:VAR="value"`）：
+
+| 环境变量 | 作用 |
+|----------|------|
+| `RADAR_PI_BASE` | 例如 `http://192.168.1.50:5000`，为空则不拉取雷达 JSON |
+| `FUSION_DEPTH_SCENE_MIN_M` / `FUSION_DEPTH_SCENE_MAX_M` | 覆盖融合用的场景深度窗（米） |
+| `FUSION_USE_DEPTH_BIN_MATCH` | 设为 `0` 或 `false` 关闭深度–通道 id 匹配 |
+| `PHYSFORMER_ENABLED` | `0` 关闭 PhysFormer 心率 |
+| `PHYSFORMER_WEIGHTS` | 指定 `.pkl` 权重路径 |
+
+### 树莓派雷达服务（`shumeipai.py`）环境变量
+
+在 **树莓派** 上启动雷达 HTTP 服务前可设置（默认串口路径适用于 Linux；Windows 若本地跑调试版则需改为 `COMx` 等）：
+
+| 环境变量 | 默认 / 说明 |
+|----------|-------------|
+| `FYP_PC_HOST` | 上位机局域网 IP；未单独设置 `FYP_UI_URL` 时用于拼出浏览器打开的界面地址 |
+| `FYP_UI_URL` | 上位机 `face_app` 根地址（如 `http://10.x.x.x:5000`），Pi 首页提示与唤醒流程使用 |
+| `FYP_LAUNCHER_URL` | 上位机 `fyp_launcher` 地址（默认拼为 `http://<PC>:8787`），供 Pi **POST /launch** 等联动 |
+| `FYP_LAUNCHER_TOKEN` | 与 launcher 校验头 `X-FYP-Token` 一致时，远程唤醒更安全 |
+| `FYP_SERIAL` | 毫米波串口设备路径，默认 `/dev/ttyUSB0` |
+| `FYP_BIND` | HTTP 监听地址，默认 `0.0.0.0` |
+| `FYP_PORT` | HTTP 端口，默认 `5000`（与上位机 `RADAR_PI_BASE` 端口一致） |
+| `FYP_OPEN_KIOSK` | 设为非 `1` 时可关闭启动时尝试打开 Chromium 全屏等行为（依脚本实现） |
+| `FYP_AUTO_START` | 设为 `0` 可关闭进程内自动启动序列（依脚本实现） |
+
+### 上位机一键入口（`fyp_launcher.py`）环境变量
+
+用于 **`python fyp_launcher.py`** 同时拉起 `face_app` 并常驻轻量 HTTP，供树莓派回调：
+
+| 环境变量 | 默认 / 说明 |
+|----------|-------------|
+| `RADAR_PI_BASE` | 传给子进程 `face_app`：树莓派雷达 API 根 URL；未设置时 launcher 可能注入 `FYP_DEFAULT_RADAR_PI_BASE` 或内置默认 IP |
+| `FYP_DEFAULT_RADAR_PI_BASE` | 覆盖内置默认树莓派地址（仅当未设置 `RADAR_PI_BASE` 时写入子进程） |
+| `FYP_LAUNCHER_PORT` | Launcher 监听端口，默认 `8787` |
+| `FYP_LAUNCHER_TOKEN` | Pi 请求 launcher 受保护接口时的令牌，需与 Pi 侧 `FYP_LAUNCHER_TOKEN` 一致 |
+| `FYP_FACEAPP_CHECK` | 探测 `face_app` 是否就绪的 URL，默认 `http://127.0.0.1:5000/api/status` |
+| `FYP_SKIP_FACE_APP_BOOT` | 设为 `1` / `true` / `yes` 时**仅启动 launcher**，不自动拉起 `face_app`（调试） |
+| `FYP_EXIT_KILL_FACE` | 默认会随 launcher 退出结束本进程启动的 `face_app`；设为 `0` 则保留 `face_app` |
+
+### HTTP `/api/status` 中的 `depth_camera` 字段
+
+便于前端与答辩演示时核对当前策略，无需翻代码：
+
+- `optimal_range_m`：对应 `DEPTH_VITAL_*` 的推荐站位；
+- `fusion_scene_m`：当前用于映射雷达通道的场景深度窗；
+- `fusion_use_depth_bin_match`：是否启用深度–雷达门匹配。
+
+### 答辩时可强调的一点
+
+**深度米数 ↔ 雷达 range bin** 无通用物理常数，依赖雷达安装高度、朝向与场景反射；上述 **场景深度窗** 宜在实测后写入论文「实验设置」，并说明采用 **启发式匹配** 而非唯一真值对应。
+
+---
+
+## 许可与引用
+
+- **Ultralytics YOLO**、**facenet-pytorch**、**Intel RealSense** 各自遵循其开源协议；撰写论文时请按课程要求引用对应库与论文。

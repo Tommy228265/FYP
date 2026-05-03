@@ -1,0 +1,14 @@
+# Local datasets (large; do not commit — cite UBFC-rPPG in thesis instead)
+/datasets/
+/data/
+
+# Common training outputs (pretrained + checkpoints; do not commit large binaries)
+/weights/*.pkl
+/physformer/PhysFormer/**/Physformer_*.pkl
+**/Physformer_UBFC_*.pkl
+*.mat
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
