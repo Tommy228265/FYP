@@ -217,6 +217,7 @@ def fuse_multiperson_vitals(
         ch = ch_assign[rank] if rank < len(ch_assign) else None
         row = {
             "slot": rank + 1,
+            "face_index": _old_i,
             "track_id": vf.get("track_id"),
             "depth_m": vf.get("depth_m") if vf.get("depth_m") is not None else depth,
             "depth_zone": vf.get("depth_zone"),

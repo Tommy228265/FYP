@@ -351,6 +351,8 @@ class BreathingHeartSystem:
                         "breathing_quality": 0.0,
                         "heart_quality": 0.0,
                         "ready": False,
+                        "breathing_signal": [],
+                        "heart_signal": [],
                     }
                 )
                 continue
@@ -367,6 +369,8 @@ class BreathingHeartSystem:
                         "breathing_quality": 0.0,
                         "heart_quality": 0.0,
                         "ready": False,
+                        "breathing_signal": [],
+                        "heart_signal": [],
                     }
                 )
                 continue
@@ -376,6 +380,8 @@ class BreathingHeartSystem:
             br_s = self._ema_smooth_scalar(prev[0], br_raw)
             hr_s = self._ema_smooth_scalar(prev[1], hr_raw)
             self._ema_ch[idx] = (br_s, hr_s)
+            br_sig = res.get("breathing_signal") or []
+            hr_sig = res.get("heart_signal") or []
             snap.append(
                 {
                     "id": idx,
@@ -386,6 +392,8 @@ class BreathingHeartSystem:
                     "breathing_quality": round(res["breathing_quality"], 3),
                     "heart_quality": round(res["heart_quality"], 3),
                     "ready": True,
+                    "breathing_signal": br_sig[-100:] if len(br_sig) > 100 else list(br_sig),
+                    "heart_signal": hr_sig[-100:] if len(hr_sig) > 100 else list(hr_sig),
                 }
             )
         self.radar_channels_snapshot = snap

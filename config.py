@@ -48,8 +48,10 @@ DEPTH_VIS_ALPHA = 0.03
 
 # ---------- Web 人脸：facenet-pytorch ----------
 FACE_PROFILE_FILE = "face_profiles_v2.npz"
+FACE_PROFILE_META_FILE = "face_profile_meta.json"
 FACE_PROFILE_VERSION = 2
 FACE_MAX_PROFILES = 10
+DISPLAY_NAME_MAX_LEN = 40
 
 ENROLL_SAMPLES_TARGET = 20
 ENROLL_SAMPLE_INTERVAL_SEC = 0.25

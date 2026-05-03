@@ -19,6 +19,95 @@
 
 ---
 
+## 模型、训练数据与文献总览（论文撰写用）
+
+下表汇总本仓库中 **曾使用或引用的所有可学习模型**、**训练/预训练数据**、**代表论文与工程来源**，以及 **本机训练脚本的超参数出处**（见各 `argparse` 默认值与 `config.py`）。**非学习模块**（纯信号处理、简单 FFT）亦单独说明，避免与深度学习混为一谈。
+
+### 总览表
+
+| 模块 | 模型/方法 | 主要用途 | 预训练或数据 | 代表文献 / 工程 |
+|------|-----------|----------|--------------|-----------------|
+| 人体检测 | YOLOv8-n（Ultralytics） | `test.py` 中检测 person；COCO 预训练权重 | COCO 2017 检测类 | 工程： [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics)；方法线：Redmon 等 YOLO 系列；v8 见 Ultralytics 文档 |
+| 人脸检测与对齐 | MTCNN（facenet-pytorch） | 人脸框与对齐，阈值等见 `face_identity.py` | WIDER Face 等公开流程使用的开源实现 | Zhang et al., *Joint Face Detection and Alignment using Multi-task Cascaded Convolutional Networks*, IEEE Signal Processing Letters, 2016 |
+| 人脸嵌入 | InceptionResnetV1，`pretrained='vggface2'` | 512 维 L2 归一化嵌入，识别与建档 | **VGGFace2** 预训练（经 facenet-pytorch 分发） | 嵌入框架：Schroff et al., *FaceNet: A Unified Embedding for Face Recognition and Clustering*, CVPR, 2015；架构：Szegedy et al., *Inception-v4, Inception-ResNet*, AAAI, 2017；数据：Cao et al., *VGGFace2: A Dataset for Recognising Faces across Pose and Age*, FG, 2018 |
+| 年龄段 | EfficientNet-B0 分类头（5 类） | `age_estimator.py` 推理；权重来自 `train_age_model.py` | **ImageNet** 预训练骨干（torchvision）+ **UTKFace** 或 **FairFace** 微调 | 骨干：Tan & Le, *EfficientNet*, ICML, 2019；UTKFace：Zhang et al., *Age Progression/Regression by Conditional Adversarial Autoencoder*, CVPR, 2017；FairFace：Kärkkäinen & Joo, *FairFace: Face Attribute Dataset for Balanced Race, Gender, and Age*, arXiv/WACV 相关引用以数据集页面为准 |
+| 远程心率 | PhysFormer（`ViT_ST_ST_Compact3_TDC_gra_sharp`） | `physformer_engine.py`；160×128×128 时序块 | **VIPL-HR 上 fold1 官方权重** 初始化 + **UBFC-rPPG** 本机微调 | Yu et al., *PhysFormer: Facial Video-based Physiological Measurement with Temporal Difference Transformer*, CVPR, 2022；预训练数据与 VIPL：Niu et al., *RhythmNet: End-to-End Heart Rate Estimation from Face*, IEEE T-IP, 2019（与官方 checkpoint 说明一致时引用）；微调数据：Bobbia et al., *Unsupervised skin tissue segmentation for remote photoplethysmography*, Pattern Recognition Letters, 2017 |
+| 视觉呼吸 | 无训练模型 | ROI 绿色通道均值 + 短时 FFT 峰值（`visual_respiration.py`） | 无 | 工程启发来自远程 PPG/成像式生理测量综述类文献即可，勿宣称临床级 |
+| 毫米波雷达 | 无深度学习 | `shumeipai.py`：相位解缠、带通、FFT/自相关、EMA | 无 | FMCW 生命体征经典信号处理；引用雷达非接触生理监测综述或教材即可 |
+
+---
+
+### 1. 人体检测：YOLOv8-n
+
+- **实现**：`ultralytics` 包，`config.YOLO_MODEL` 默认为 `yolov8n.pt`，检测类别在 `test.py` 中限制为 **person（class 0）**。
+- **权重来源**：首次运行由 Ultralytics **自动下载**；在 **MS COCO** 目标检测任务上预训练（80 类中的 `person`）。
+- **本项目推理参数（来自 `config.py`）**：`YOLO_CONFIDENCE=0.35`，`YOLO_IMGSZ=640`，`YOLO_DEVICE` 默认 `cpu`（可按机器改为 `0` 使用 GPU）。
+- **文献与引用**：工程文档与许可见 [Ultralytics](https://github.com/ultralytics/ultralytics)；论文中可引用 YOLO 系列原始工作（如 Redmon et al., YOLO；后续版本按课程要求选引）。
+
+---
+
+### 2. 人脸：MTCNN + InceptionResnetV1（facenet-pytorch）
+
+- **实现**：`face_identity.py`，依赖 **`facenet_pytorch`** 的 `MTCNN` 与 `InceptionResnetV1`。
+- **MTCNN**：三级级联检测与五点对齐；默认 `thresholds=[0.6, 0.7, 0.7]`，`factor=0.709`，`image_size=160`，`margin=14`，与常见开源实现一致。
+- **InceptionResnetV1**：`pretrained='vggface2'`（`config.FACE_PRETRAINED`），输出 **512 维** 嵌入，代码内 **L2 归一化** 后做余弦相似度。
+- **数据与权重**：**VGGFace2** 大规模人脸识别数据上训练的公开权重（通过 PyTorch 加载）；**非**在本项目中从零训练。
+- **文献**：FaceNet 嵌入学习框架（Schroff et al., CVPR 2015）；Inception-ResNet 结构（Szegedy et al., AAAI 2017）；VGGFace2 数据集（Cao et al., FG 2018）；MTCNN（Zhang et al., IEEE SPL 2016）。
+
+---
+
+### 3. 年龄段：EfficientNet-B0
+
+- **结构**：`age_estimator.create_efficientnet_b0`：torchvision **EfficientNet-B0**，替换最后一层为 **5 类**（儿童 / 青少年 / 青年 / 中年 / 老年，年龄边界见 `config.AGE_CLASSES`）。
+- **预训练**：训练脚本默认 **`ImageNet` 预训练骨干**（`torchvision.models.efficientnet_b0(weights=...)`）；可用 `--no-pretrained` 关闭对照实验。
+- **微调数据（任选其一或组合）**：
+  - **UTKFace**：文件名格式解析年龄 → 映射到 5 类（`train_age_model.py` 中 `UTKFaceDataset`）。
+  - **FairFace**：CSV 中年龄/年龄段字段解析（`FairFaceDataset`）。
+- **训练超参数（默认值来自 `train_age_model.py` 的 `argparse`）**：`epochs=12`，`warmup-epochs=2`（先冻结主干只训分类头），`batch-size=32`，`lr=3e-4`，`head-lr=8e-4`（warmup 阶段），`weight-decay=1e-4`，`label-smoothing=0.04`，`val-ratio=0.15`，`seed=42`；数据增强含 `RandomResizedCrop`、`ColorJitter`、`RandomErasing` 等（见脚本内 `train_transform`）。
+- **推理**: `AGE_INPUT_SIZE=224`，归一化均值方差为 **ImageNet 标准** `[0.485,0.456,0.406]` / `[0.229,0.224,0.225]`。
+- **文献**：EfficientNet（Tan & Le, ICML 2019）；UTKFace、FairFace 见上表；类别年龄段划分为本项目任务定义，非某一篇论文专有。
+
+---
+
+### 4. 远程心率：PhysFormer
+
+- **网络**：`physformer/PhysFormer/model` 中 **`ViT_ST_ST_Compact3_TDC_gra_sharp`**，与仓库内训练脚本一致的超参实例：`image_size=(160,128,128)`，`patches=(4,4,4)`，`dim=96`，`ff_dim=144`，`num_heads=4`，`num_layers=12`，`dropout_rate=0.1`，`theta=0.7`（见 `physformer_engine.py` 与 `train_Physformer_160_UBFC.py`）。
+- **预训练权重**：官方在 **VIPL-HR** 流程上得到的 **fold1** checkpoint（文件名常为 `Physformer_VIPL_fold1.pkl`），从 [ZitongYu/PhysFormer](https://github.com/ZitongYu/PhysFormer) README/Google Drive 获取；**非随机初始化**。
+- **本机微调数据**：**UBFC-rPPG**，脚本 `train_Physformer_160_UBFC.py`；每个 `subject*` 含 `vid.avi` 与 `ground_truth.txt`。
+- **训练默认超参（来自脚本 `argparse`）**：`lr=1e-4`，`batchsize=4`，优化器 **Adam**，`weight_decay=5e-5`，学习率调度 **StepLR**（`step_size=50`，`gamma=0.5`），`epochs=25`，`clip_stride=80`（滑窗起始间隔），`val_ratio=0.2`，`split_seed=42`，`num_workers` 默认 `0`（Windows 建议）；每 epoch 保存 `Physformer_UBFC_{fold}_{epoch}.pkl`。
+- **实时推理（`physformer_engine.py`）**：每轨迹缓冲 **`CLIP_FRAMES=160`** 帧，人脸块 **128×128**，滑动 **`SLIDE=80`**；模型输出后经归一化，心率可由 **频域峰**（约 **0.65–3.5 Hz**）换算 BPM（实现细节见源码）。Web 展示权重默认 **`weights/Physformer_UBFC_best.pkl`** 或通过 `PHYSFORMER_WEIGHTS` 指定。
+- **文献**：PhysFormer（Yu et al., CVPR 2022）；PhysFormer++（Yu et al., IJCV 2023，若换用++权重）；VIPL-HR / RhythmNet（Niu et al., IEEE T-IP 2019）；UBFC-rPPG（Bobbia et al., PRL 2017）。
+
+---
+
+### 5. 视觉呼吸估计（无训练）
+
+- **方法**：人脸 ROI **绿色通道** 时间序列 + **rFFT**，在约 **0.12–0.55 Hz** 带内取峰值得呼吸率（`visual_respiration.py`），并对输出做 **EMA** 平滑。
+- **论文表述建议**：标注为 **简易启发式 / 辅助 modality**，与深度学习或雷达物理模型区分。
+
+---
+
+### 6. 毫米波雷达管线（树莓派，无深度学习）
+
+- **内容**：相位解缠、带通滤波、谐波抑制、**Hann 窗 FFT + 抛物线细化**、**自相关** 与 **EMA**（`shumeipai.py`）；与摄像头融合逻辑见 `radar_fusion.py`。
+- **文献**：可引用 FMCW 非接触生命体征监测综述或教材；无需绑定某一神经网络论文。
+
+---
+
+### 7. 参数来源小结（便于答辩）
+
+| 参数类别 | 主要来自 |
+|----------|----------|
+| YOLO / 人脸 / 深度 Web 门控 | `config.py` 与本项目实验设定 |
+| 年龄段训练默认超参 | `train_age_model.py` 中 `argparse` 默认值 |
+| PhysFormer 训练默认超参 | `physformer/PhysFormer/train_Physformer_160_UBFC.py` 中 `argparse` 默认值；网络结构字段与官方仓库模型定义一致 |
+| PhysFormer 推理缓冲长度 | `physformer_engine.py` 中 `CLIP_FRAMES`、`SLIDE` 等常量 |
+| 雷达频段与采样 | `shumeipai.py` 内 `sample_rate`、呼吸/心率频带等 |
+
+若论文需写「超参数是否网格搜索」，请按你实际实验补充；本 README 仅反映 **代码中的默认实现**。
+
+---
+
 ## 环境与依赖
 
 - **硬件**：Intel RealSense D435（USB3），安装 [Intel RealSense SDK 2.0](https://github.com/IntelRealSense/librealsense) 及对应 Python 包 `pyrealsense2`。
@@ -57,20 +146,11 @@ FYP/
 └── age_model_effnet_b0.pth # 年龄段模型权重（训练后生成）
 ```
 
-### PhysFormer 心率模型（UBFC 微调 + 预训练权重）
+### PhysFormer 心率模型（简要）
 
-- **数据**：本机因存储限制仅保留 **部分** [UBFC-rPPG](https://sites.google.com/view/ybenezeth/ubfcrppg) 序列；当前使用目录 `datasets/UBFC-rPPG/`，其下每个 `subject*/` 需同时包含 `vid.avi` 与 `ground_truth.txt`（官方 DATASET_2 三行格式见数据集附带说明）。完整数据可从作者页面获取；论文中应说明**子集规模**与划分方式。
-- **预训练权重（规范声明）**：远程生理估计分支在 **PhysFormer 官方在 VIPL-HR 上训练得到的 fold1 权重** 上继续微调，**非**自研骨干随机初始化。权重文件名为 `Physformer_VIPL_fold1.pkl`，来源为 [ZitongYu/PhysFormer](https://github.com/ZitongYu/PhysFormer) README 中 Google Drive 链接；请下载后置于项目内 **`weights/Physformer_VIPL_fold1.pkl`**（该文件已加入 `.gitignore`，避免将大文件提交到 Git）。若需自动下载，可使用 `pip install gdown` 后：  
-  `gdown "https://drive.google.com/uc?id=1jBSbM88fA-beaoVi8ILFyL0SvVVMA9c9" -O weights/Physformer_VIPL_fold1.pkl`  
-- **训练脚本**：`physformer/PhysFormer/train_Physformer_160_UBFC.py`，在含 PyTorch+CUDA 的环境中执行，示例见下节「PhysFormer 训练命令」。
-- **实时推理（Web）**：`face_app.py` 通过 `physformer_engine.py` 懒加载 **UBFC 微调后的 `.pkl`**（默认自动查找 `weights/Physformer_UBFC_best.pkl`，亦可用环境变量 `PHYSFORMER_WEIGHTS` 指定；设 `PHYSFORMER_ENABLED=0` 可关闭）。对每路检测到的人脸维护 160 帧 RGB 小块，在 **GPU** 上估计心率并显示在画面与侧栏；**与树莓派毫米波**并列：视觉为**每人** rPPG 心率，雷达为**场景**呼吸/心率（需 `RADAR_PI_BASE`）。
-
-**引用（与 README 中预训练/数据一致时请在论文中列出）**：
-
-- PhysFormer 与预训练检查点：Yu et al., *PhysFormer: Facial Video-based Physiological Measurement with Temporal Difference Transformer*, CVPR, 2022.（BibTeX 见 [PhysFormer 仓库](https://github.com/ZitongYu/PhysFormer)）
-- PhysFormer++（若后续换用++ 权重）：Yu et al., IJCV, 2023.
-- VIPL-HR（预训练数据出处）：Niu et al., *RhythmNet...*, IEEE T-IP, 2019.（与官方预训练权重的训练集一致时引用。）
-- UBFC-rPPG（本机微调数据）：Bobbia et al., *Unsupervised skin tissue segmentation for remote photoplethysmography*, Pattern Recognition Letters, 2017.
+- **数据**：本机可仅用 **部分** [UBFC-rPPG](https://sites.google.com/view/ybenezeth/ubfcrppg)（`datasets/UBFC-rPPG/subject*/`，含 `vid.avi` 与 `ground_truth.txt`）；论文需写明子集规模。
+- **权重**：先用官方 **VIPL fold1** `Physformer_VIPL_fold1.pkl`（[PhysFormer 仓库](https://github.com/ZitongYu/PhysFormer)），再微调；推理默认 `weights/Physformer_UBFC_best.pkl` 或 `PHYSFORMER_WEIGHTS`。
+- **完整文献、默认训练超参、网络字段**：见上文 **「模型、训练数据与文献总览」**；训练命令见下文 **PhysFormer 训练命令**。
 
 ---
 

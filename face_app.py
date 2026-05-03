@@ -1,3 +1,4 @@
+import copy
 import json
 import math
 import threading
@@ -6,7 +7,7 @@ import urllib.error
 import urllib.request
 from collections import Counter, deque
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -18,6 +19,8 @@ from config import (
     WIDTH,
     HEIGHT,
     FPS,
+    DISPLAY_NAME_MAX_LEN,
+    FACE_PROFILE_META_FILE,
     DEPTH_VALID_MIN_M,
     DEPTH_VALID_MAX_M,
     DEPTH_MIN_VALID_PIXELS,
@@ -97,6 +100,10 @@ last_recognition = {
 
 PERSON_KEYS = [f"person{i}" for i in range(1, FACE_MAX_PROFILES + 1)]
 PERSON_LABELS = {person: f"人物{i}" for i, person in enumerate(PERSON_KEYS, start=1)}
+
+profile_meta: Dict[str, Dict[str, Any]] = {p: {"display_name": ""} for p in PERSON_KEYS}
+pending_enroll_display_name: Optional[str] = None
+last_live_preview: Dict[str, Any] = {"faces": [], "updated_at": 0.0}
 
 profiles = {person: None for person in PERSON_KEYS}
 enroll_buffers = {person: [] for person in PERSON_KEYS}
@@ -333,6 +340,22 @@ def add_age_evaluation(age_result: dict, matched_person: Optional[str]):
     return age_result
 
 
+def label_for_person(person: Optional[str]) -> str:
+    if person is None:
+        return "未知面容"
+    meta = profile_meta.get(person) or {}
+    dn = (meta.get("display_name") or "").strip()
+    if dn:
+        return dn
+    if profiles.get(person) is not None:
+        return "未命名"
+    try:
+        idx = PERSON_KEYS.index(person) + 1
+        return f"槽位{idx}"
+    except ValueError:
+        return str(person)
+
+
 def classify_face_embedding(emb: np.ndarray):
     ready_profiles = [(person, profile) for person, profile in profiles.items() if profile is not None]
     if not ready_profiles:
@@ -347,7 +370,7 @@ def classify_face_embedding(emb: np.ndarray):
         if score > best_score:
             best_person = person
             best_score = score
-            best_name = PERSON_LABELS[person]
+            best_name = label_for_person(person)
 
     if best_score < FACE_RECOGNITION_THRESHOLD:
         return None, "Unknown", best_score
@@ -406,6 +429,56 @@ def save_profiles():
     path = Path(FACE_PROFILE_FILE)
     if path.exists():
         path.unlink()
+
+
+def _sanitize_display_name(raw: Any) -> str:
+    if raw is None:
+        return "未命名"
+    s = str(raw).strip()
+    if not s:
+        return "未命名"
+    return s[:DISPLAY_NAME_MAX_LEN]
+
+
+def load_profile_meta():
+    path = Path(FACE_PROFILE_META_FILE)
+    if not path.is_file():
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return
+        for p in PERSON_KEYS:
+            if p in data and isinstance(data[p], dict):
+                dn = data[p].get("display_name") or ""
+                profile_meta[p]["display_name"] = str(dn)[:DISPLAY_NAME_MAX_LEN]
+    except Exception as exc:
+        print("[WARN] load_profile_meta:", exc)
+
+
+def save_profile_meta():
+    path = Path(FACE_PROFILE_META_FILE)
+    try:
+        out = {p: dict(profile_meta[p]) for p in PERSON_KEYS}
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(out, f, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        print("[WARN] save_profile_meta:", exc)
+
+
+def _age_dict_for_api(age_result: Optional[dict]) -> Optional[dict]:
+    if not age_result:
+        return None
+    return {
+        "label": age_result.get("label"),
+        "label_en": age_result.get("label_en"),
+        "range": age_result.get("range"),
+        "confidence": float(age_result.get("confidence", 0) or 0),
+        "class_index": int(age_result.get("class_index", -1)),
+        "evaluation": age_result.get("evaluation"),
+        "smoothed": age_result.get("smoothed"),
+    }
 
 
 def load_profiles():
@@ -505,6 +578,7 @@ def stop_camera():
 
 def frame_generator():
     global last_enroll_time, status_text, mode, enroll_person, last_recognition, last_vitals, last_vitals_fusion, last_depth_jpeg
+    global last_live_preview, pending_enroll_display_name
     embedder = get_embedder()
     age_estimator = get_age_estimator()
     while True:
@@ -525,6 +599,7 @@ def frame_generator():
         with state_lock:
             local_mode = mode
             local_person = enroll_person
+            local_pending_name = pending_enroll_display_name
 
         face_items = embedder.embed_all_from_bgr(frame)
         pe = get_physformer()
@@ -626,6 +701,7 @@ def frame_generator():
         recognition_labels = []
         recognition_scores = []
         recognition_ages = []
+        live_preview_list: List[dict] = []
 
         if local_mode == "enroll" and local_person in PERSON_KEYS and len(face_items) > 1:
             with state_lock:
@@ -667,9 +743,24 @@ def frame_generator():
                 FACE_MIN_BLUR_VARIANCE <= 0 or blur >= FACE_MIN_BLUR_VARIANCE
             )
 
+            age_raw = None
+            age_live = None
+            if quality_ok:
+                face_crop = frame[y:y2, x:x2]
+                age_raw = age_estimator.estimate_from_bgr_crop(face_crop)
+                age_raw = apply_age_calibration(age_raw)
+                age_live = smooth_age_result(copy.deepcopy(age_raw), f"live_{face_index}")
+
+            pv = {
+                "slot": face_index + 1,
+                "quality_ok": quality_ok,
+                "age": _age_dict_for_api(age_live) if quality_ok and age_live else None,
+            }
+            if not quality_ok:
+                pv["reason"] = "low_quality"
+            live_preview_list.append(pv)
+
             now = time.time()
-            label = f"Face p:{prob_value:.2f}"
-            color = (200, 200, 0)
 
             if local_mode == "enroll" and local_person in PERSON_KEYS:
                 if len(face_items) == 1 and quality_ok and (now - last_enroll_time) >= ENROLL_SAMPLE_INTERVAL_SEC:
@@ -677,8 +768,8 @@ def frame_generator():
                         enroll_buffers[local_person].append(emb)
                         last_enroll_time = now
                         count = len(enroll_buffers[local_person])
-                        person_label = PERSON_LABELS[local_person]
-                        status_text = f"正在录入 {person_label}: {count}/{ENROLL_SAMPLES_TARGET}"
+                        nm = local_pending_name or "未命名"
+                        status_text = f"正在录入「{nm}」: {count}/{ENROLL_SAMPLES_TARGET}"
                         if count >= ENROLL_SAMPLES_TARGET:
                             template = build_profile_template(enroll_buffers[local_person])
                             duplicate_person, duplicate_score = find_duplicate_profile(
@@ -686,27 +777,35 @@ def frame_generator():
                                 exclude_person=local_person,
                             )
                             if duplicate_person is not None:
-                                duplicate_label = PERSON_LABELS[duplicate_person]
+                                duplicate_label = label_for_person(duplicate_person)
                                 status_text = (
-                                    f"检测到重复面容：与{duplicate_label}相似度"
+                                    f"检测到重复面容：与「{duplicate_label}」相似度"
                                     f"{duplicate_score:.2f}，本次录入已取消"
                                 )
+                                pending_enroll_display_name = None
                             else:
                                 profiles[local_person] = template
                                 profile_ages[local_person] = pending_enroll_ages.get(local_person)
+                                profile_meta[local_person]["display_name"] = _sanitize_display_name(
+                                    local_pending_name
+                                )
                                 save_profiles()
-                                status_text = f"{person_label}录入完成"
+                                save_profile_meta()
+                                finished = profile_meta[local_person]["display_name"]
+                                status_text = f"「{finished}」录入完成"
+                                pending_enroll_display_name = None
                             enroll_buffers[local_person] = []
                             pending_enroll_ages[local_person] = None
                             mode = "idle"
                             enroll_person = None
                 progress = len(enroll_buffers.get(local_person, []))
-                label = f"Enroll {PERSON_LABELS[local_person]} {progress}/{ENROLL_SAMPLES_TARGET}"
+                nm = local_pending_name or "未命名"
+                label = f"录入「{nm}」 {progress}/{ENROLL_SAMPLES_TARGET}"
                 if len(face_items) > 1:
-                    label += " Single face only"
+                    label += " · 仅单人"
                     color = (0, 165, 255)
                 elif not quality_ok:
-                    label += " Low quality"
+                    label += " · 请保持稳定"
                     color = (0, 165, 255)
                 else:
                     color = (0, 255, 255)
@@ -714,12 +813,17 @@ def frame_generator():
                 if quality_ok:
                     matched_person, name, score = classify_face_embedding(emb)
                     display_name = name if name != "Unknown" else "未知面容"
-                    face_crop = frame[y:y2, x:x2]
-                    age_result = age_estimator.estimate_from_bgr_crop(face_crop)
-                    age_result = apply_age_calibration(age_result)
-                    history_key = matched_person if matched_person is not None else f"unknown_{face_index}"
-                    age_result = smooth_age_result(age_result, history_key)
-                    age_result = add_age_evaluation(age_result, matched_person)
+                    hist_key = matched_person if matched_person is not None else f"unknown_{face_index}"
+                    if age_raw:
+                        age_result = smooth_age_result(copy.deepcopy(age_raw), hist_key)
+                        age_result = add_age_evaluation(age_result, matched_person)
+                    else:
+                        age_result = {
+                            "label": "无法估计",
+                            "label_en": "N/A",
+                            "range": "-",
+                            "confidence": 0.0,
+                        }
                     recognition_labels.append(display_name)
                     recognition_scores.append(score)
                     recognition_ages.append(age_result)
@@ -735,6 +839,17 @@ def frame_generator():
                     )
                     label = f"Low quality p:{prob_value:.2f} blur:{blur:.0f}"
                     color = (0, 165, 255)
+            else:
+                if quality_ok and age_live is not None:
+                    age_label = age_live.get("label", "?")
+                    age_range = age_live.get("range", "")
+                    label = f"{age_label} · {age_range}"
+                    color = (200, 200, 255)
+                else:
+                    label = f"Face p:{prob_value:.2f}"
+                    if not quality_ok:
+                        label += " · 需更清晰"
+                    color = (200, 200, 0)
 
             if vitals_list and face_index < len(vitals_list):
                 vd = vitals_list[face_index]
@@ -762,6 +877,9 @@ def frame_generator():
                 )
 
             draw_label(frame, label, x, y, color)
+
+        with state_lock:
+            last_live_preview = {"faces": live_preview_list, "updated_at": time.time()}
 
         if local_mode == "recognize" and recognition_labels:
             with state_lock:
@@ -849,16 +967,21 @@ def video_depth():
 @app.route("/api/status")
 def api_status():
     with state_lock:
-        profile_items = [
-            {
-                "id": person,
-                "label": PERSON_LABELS[person],
-                "ready": profiles[person] is not None,
-                "samples": len(enroll_buffers[person]),
-                "actual_age": profile_ages[person],
-            }
-            for person in PERSON_KEYS
-        ]
+        profile_items = []
+        for idx, person in enumerate(PERSON_KEYS):
+            dn = (profile_meta[person].get("display_name") or "").strip()
+            ready = profiles[person] is not None
+            label = dn or ("未命名" if ready else f"槽位{idx + 1}")
+            profile_items.append(
+                {
+                    "id": person,
+                    "label": label,
+                    "display_name": dn,
+                    "ready": ready,
+                    "samples": len(enroll_buffers[person]),
+                    "actual_age": profile_ages[person],
+                }
+            )
         return jsonify(
             {
                 "mode": mode,
@@ -867,6 +990,7 @@ def api_status():
                 "ready_count": sum(1 for profile in profiles.values() if profile is not None),
                 "target_samples": ENROLL_SAMPLES_TARGET,
                 "last_recognition": last_recognition,
+                "live_preview": dict(last_live_preview),
                 "age_model_status": get_age_estimator().status,
                 "profiles": profile_items,
                 "vitals": last_vitals,
@@ -888,28 +1012,34 @@ def api_status():
 
 @app.route("/api/enroll/start", methods=["POST"])
 def api_enroll_start():
-    global mode, enroll_person, status_text, last_enroll_time, last_recognition
+    global mode, enroll_person, status_text, last_enroll_time, last_recognition, pending_enroll_display_name
     body = request.get_json(silent=True) or {}
     person = body.get("person")
     if person not in PERSON_KEYS:
         return jsonify({"ok": False, "error": f"person must be one of {', '.join(PERSON_KEYS)}"}), 400
-    actual_age = body.get("actual_age")
-    try:
-        actual_age = int(actual_age)
-    except (TypeError, ValueError):
-        return jsonify({"ok": False, "error": "请先输入该人物的真实年龄"}), 400
-    if actual_age < 0 or actual_age > 120:
-        return jsonify({"ok": False, "error": "真实年龄应在 0 到 120 之间"}), 400
+    raw_age = body.get("actual_age")
+    actual_age = None
+    if raw_age is not None and raw_age != "":
+        try:
+            actual_age = int(raw_age)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "真实年龄应为整数"}), 400
+        if actual_age < 0 or actual_age > 120:
+            return jsonify({"ok": False, "error": "真实年龄应在 0 到 120 之间"}), 400
+
+    display_nm = _sanitize_display_name(body.get("display_name"))
 
     with state_lock:
         mode = "enroll"
         enroll_person = person
+        pending_enroll_display_name = display_nm
         age_prediction_histories.clear()
         enroll_buffers[person] = []
         pending_enroll_ages[person] = actual_age
         last_enroll_time = 0.0
         last_recognition = reset_recognition("未识别")
-        status_text = f"开始录入 {PERSON_LABELS[person]}（真实年龄 {actual_age} 岁），请正对摄像头并保持稳定"
+        age_hint = f"，参考年龄 {actual_age} 岁" if actual_age is not None else "（未填写参考年龄，将无法比对预测准确度）"
+        status_text = f"开始录入「{display_nm}」{age_hint}，请正对摄像头并保持稳定"
     return jsonify({"ok": True})
 
 
@@ -941,12 +1071,14 @@ def api_profile_delete():
         pending_enroll_ages[person] = None
         age_prediction_histories.pop(person, None)
         enroll_buffers[person] = []
+        profile_meta[person] = {"display_name": ""}
         if enroll_person == person:
             enroll_person = None
             mode = "idle"
         last_recognition = reset_recognition("未识别")
         save_profiles()
-        status_text = f"已删除 {PERSON_LABELS[person]} 的面容档案"
+        save_profile_meta()
+        status_text = f"已删除槽位 {PERSON_KEYS.index(person) + 1} 的面容档案"
     return jsonify({"ok": True})
 
 
@@ -1038,7 +1170,23 @@ def api_radar_stop():
     return jsonify({"ok": success, "message": msg})
 
 
+@app.route("/api/profile/display_name", methods=["POST"])
+def api_profile_display_name():
+    global status_text
+    body = request.get_json(silent=True) or {}
+    person = body.get("person")
+    if person not in PERSON_KEYS:
+        return jsonify({"ok": False, "error": f"person must be one of {', '.join(PERSON_KEYS)}"}), 400
+    name = _sanitize_display_name(body.get("display_name"))
+    with state_lock:
+        profile_meta[person]["display_name"] = name
+        save_profile_meta()
+        status_text = f"已更新档案名称：「{name}」"
+    return jsonify({"ok": True})
+
+
 if __name__ == "__main__":
+    load_profile_meta()
     load_profiles()
     start_camera()
     threading.Thread(target=radar_background_poll_loop, daemon=True).start()
