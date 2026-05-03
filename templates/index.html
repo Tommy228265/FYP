@@ -8,15 +8,15 @@
   <style>
     :root {
       color-scheme: light;
-      --bg: #f5f5f7;
+      --bg: #eef2f7;
       --surface: #ffffff;
-      --text: #1d1d1f;
-      --muted: #6e6e73;
-      --border: rgba(0, 0, 0, 0.06);
-      --border-strong: #d2d2d7;
-      --accent: #1d1d1f;
-      --focus: #0071e3;
-      --hero-glow: rgba(0, 113, 227, 0.08);
+      --text: #0f172a;
+      --muted: #475569;
+      --border: #cbd5e1;
+      --border-strong: #94a3b8;
+      --accent: #1e40af;
+      --focus: #2563eb;
+      --radius-panel: 12px;
     }
 
     * { box-sizing: border-box; }
@@ -24,17 +24,18 @@
       margin: 0;
       min-height: 100vh;
       font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      font-size: 14px;
-      line-height: 1.5;
+      font-size: 16px;
+      line-height: 1.6;
       color: var(--text);
       background: var(--bg);
       -webkit-font-smoothing: antialiased;
     }
 
     .container {
-      max-width: 1280px;
+      width: 100%;
+      max-width: min(1920px, 100%);
       margin: 0 auto;
-      padding: 24px 20px 40px;
+      padding: 14px 18px 36px;
     }
 
     .page-header {
@@ -57,32 +58,165 @@
     }
 
     .layout {
+      display: block;
+      max-width: min(1240px, 100%);
+      margin: 0 auto;
+    }
+    .layout-enroll-first {
+      margin-bottom: 12px;
+    }
+
+    .brand-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px 18px;
+      margin-bottom: 10px;
+    }
+    .brand {
+      display: flex;
+      gap: clamp(12px, 2vw, 18px);
+      align-items: flex-start;
+      text-align: left;
+    }
+    .brand-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 700;
+      font-size: 0.8rem;
+      letter-spacing: -0.02em;
+      flex-shrink: 0;
+    }
+    .brand-kicker {
+      margin: 0 0 2px;
+      font-size: 0.7rem;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .brand-title {
+      margin: 0;
+      font-size: 1.125rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.3;
+      max-width: 36rem;
+      color: var(--text);
+    }
+    .nav-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: clamp(8px, 1.2vw, 12px);
+      align-items: center;
+    }
+    .nav-actions a.btn-quiet {
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      border-radius: 8px;
+      padding: clamp(10px, 1.1vw, 14px) clamp(14px, 1.8vw, 20px);
+      min-height: 44px;
+      border: 1px solid var(--border-strong);
+      font-weight: 600;
+      font-size: clamp(14px, 0.85vw + 12px, 17px);
+    }
+    .sensor-line {
+      margin: 0 0 10px;
+      font-size: 0.8125rem;
+      color: var(--text);
+      font-weight: 500;
+    }
+    #sensor-chip {
+      padding: 5px 11px;
+      border-radius: 6px;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      color: #1e3a8a;
+      font-weight: 600;
+    }
+
+    .site-footer {
+      margin-top: 40px;
+      padding-top: 28px;
+      border-top: 1px solid var(--border);
+      color: #334155;
+      font-size: 0.9375rem;
+      line-height: 1.65;
+    }
+    .footer-grid {
       display: grid;
-      grid-template-columns: minmax(0, 1.4fr) minmax(300px, 0.85fr);
-      gap: 16px;
-      align-items: start;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: clamp(18px, 3vw, 36px);
+      margin-bottom: clamp(24px, 3vw, 40px);
+    }
+    @media (max-width: 860px) {
+      .footer-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    .site-footer h4 {
+      margin: 0 0 10px;
+      font-size: clamp(0.82rem, 0.6vw + 0.72rem, 0.98rem);
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: 0.02em;
+    }
+    .site-footer p,
+    .site-footer ol {
+      margin: 0;
+    }
+    .site-footer ol {
+      padding-left: 1.2em;
+    }
+    .footer-copy {
+      margin: 0;
+      padding-top: clamp(18px, 2vw, 28px);
+      border-top: 1px solid var(--border);
+      font-size: 0.8125rem;
+      color: #64748b;
+      text-align: center;
+    }
+    .footer-em {
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .video-dual.video-single,
+    .video-dual-rgb-only {
+      grid-template-columns: 1fr;
+      max-width: min(920px, 100%);
+      margin: 0 auto;
     }
 
     .panel {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 16px;
+      border-radius: var(--radius-panel);
+      padding: clamp(16px, 2vw, 28px);
     }
 
     .panel-label {
-      font-size: 0.6875rem;
+      font-size: clamp(0.68rem, 0.45vw + 0.55rem, 0.82rem);
       font-weight: 600;
       letter-spacing: 0.06em;
       text-transform: uppercase;
       color: var(--muted);
-      margin-bottom: 10px;
+      margin-bottom: clamp(8px, 1vw, 12px);
     }
 
     .video-dual {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 8px;
+      gap: clamp(10px, 1.5vw, 18px);
+      align-items: stretch;
     }
     @media (max-width: 900px) {
       .video-dual {
@@ -92,27 +226,27 @@
     .video-wrap {
       position: relative;
       overflow: hidden;
-      border-radius: 6px;
-      background: #09090b;
-      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      background: #1e293b;
+      border: 1px solid #334155;
     }
     .video-wrap img {
       display: block;
       width: 100%;
-      min-height: 220px;
-      max-height: 40vh;
+      min-height: clamp(240px, 30vh, 520px);
+      max-height: min(65vh, 920px);
       object-fit: cover;
     }
     .video-chip {
       position: absolute;
-      right: 10px;
-      top: 10px;
-      padding: 4px 8px;
-      border-radius: 4px;
+      right: clamp(8px, 1.2vw, 14px);
+      top: clamp(8px, 1.2vw, 14px);
+      padding: clamp(5px, 0.6vw, 8px) clamp(8px, 1vw, 12px);
+      border-radius: 6px;
       background: rgba(24, 24, 27, 0.85);
       color: #fafafa;
-      font-size: 11px;
-      font-weight: 500;
+      font-size: clamp(11px, 0.65vw + 10px, 15px);
+      font-weight: 600;
     }
 
     .toolbar {
@@ -124,15 +258,16 @@
 
     button {
       border: 1px solid var(--border-strong);
-      border-radius: 6px;
-      padding: 8px 14px;
+      border-radius: 8px;
+      padding: clamp(10px, 1.1vw, 14px) clamp(16px, 2vw, 24px);
       cursor: pointer;
-      font-size: 13px;
-      font-weight: 500;
+      font-size: clamp(14px, 0.85vw + 12px, 18px);
+      font-weight: 600;
       font-family: inherit;
       background: var(--surface);
       color: var(--text);
       transition: background 0.15s, border-color 0.15s;
+      min-height: 44px;
     }
     button:hover:not(:disabled) {
       background: #fafafa;
@@ -163,7 +298,7 @@
     .hint {
       margin: 12px 0 0;
       color: var(--muted);
-      font-size: 12px;
+      font-size: clamp(0.82rem, 0.65vw + 0.7rem, 1rem);
       line-height: 1.6;
     }
     .hint code {
@@ -221,18 +356,18 @@
     }
     .metric {
       padding: 10px 10px;
-      border-radius: 6px;
-      background: #fafafa;
+      border-radius: 8px;
+      background: #f8fafc;
       border: 1px solid var(--border);
     }
     .metric small {
       display: block;
       color: var(--muted);
       margin-bottom: 4px;
-      font-size: 11px;
+      font-size: clamp(0.78rem, 0.55vw + 0.65rem, 0.98rem);
     }
     .metric strong {
-      font-size: 15px;
+      font-size: clamp(1.05rem, 1.15vw + 0.8rem, 1.55rem);
       font-weight: 600;
       color: var(--text);
     }
@@ -250,28 +385,61 @@
     }
     .radar-chart-card h3 {
       margin: 0 0 6px;
-      font-size: 11px;
+      font-size: clamp(0.72rem, 0.55vw + 0.62rem, 0.9rem);
       font-weight: 600;
       color: var(--muted);
       letter-spacing: 0.02em;
     }
+    .chart-subtitle {
+      font-weight: 400;
+      color: #71717a;
+      font-size: clamp(0.68rem, 0.5vw + 0.58rem, 0.88rem);
+    }
+    .fusion-table-wrap table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: clamp(0.82rem, 0.65vw + 0.72rem, 1.05rem);
+    }
+    .fusion-table-wrap th,
+    .fusion-table-wrap td {
+      padding: clamp(6px, 0.8vw, 10px) clamp(8px, 1vw, 12px) clamp(6px, 0.8vw, 10px) 0;
+      vertical-align: top;
+    }
+    .fusion-meta {
+      margin-top: clamp(6px, 1vw, 10px);
+      color: #71717a;
+      font-size: clamp(0.78rem, 0.58vw + 0.68rem, 0.98rem);
+    }
+    .slot-sub {
+      font-size: clamp(0.72rem, 0.52vw + 0.62rem, 0.9rem);
+      color: #52525b;
+      margin-top: 2px;
+    }
+    .radar-waveform-key .rwk-note {
+      color: #71717a;
+      font-size: clamp(0.72rem, 0.52vw + 0.62rem, 0.92rem);
+    }
+    .hint-secondary {
+      color: #475569;
+    }
     .chart-box {
-      height: 180px;
+      height: clamp(200px, 22vh, 360px);
       position: relative;
+      min-height: 180px;
     }
 
     .radar-waveform-key {
       margin-top: 14px;
-      padding: 12px 14px;
+      padding: clamp(12px, 1.5vw, 18px) clamp(14px, 1.8vw, 20px);
       border-radius: 10px;
       border: 1px solid var(--border);
       background: #fafafa;
-      font-size: 12px;
+      font-size: clamp(0.82rem, 0.65vw + 0.72rem, 1rem);
       line-height: 1.5;
       color: var(--text);
     }
     .radar-waveform-key .rwk-title {
-      font-size: 11px;
+      font-size: clamp(0.75rem, 0.55vw + 0.65rem, 0.92rem);
       font-weight: 600;
       color: var(--muted);
       margin-bottom: 8px;
@@ -299,14 +467,14 @@
       margin-bottom: 12px;
     }
     .message {
-      padding: 10px 12px;
-      border-radius: 6px;
-      background: #fafafa;
+      padding: 12px 14px;
+      border-radius: 8px;
+      background: #f8fafc;
       border: 1px solid var(--border);
       color: var(--text);
       margin-bottom: 12px;
-      font-size: 13px;
-      line-height: 1.45;
+      font-size: 0.9375rem;
+      line-height: 1.55;
     }
 
     .result-card {
@@ -322,7 +490,7 @@
     }
     .result-label {
       margin: 0 0 4px;
-      font-size: 11px;
+      font-size: clamp(0.72rem, 0.55vw + 0.62rem, 0.88rem);
       font-weight: 600;
       letter-spacing: 0.04em;
       text-transform: uppercase;
@@ -330,14 +498,14 @@
     }
     .result-name {
       margin: 0;
-      font-size: 1rem;
+      font-size: clamp(1.05rem, 1vw + 0.85rem, 1.35rem);
       font-weight: 600;
       line-height: 1.35;
       color: var(--text);
     }
     .result-score {
       margin-top: 8px;
-      font-size: 12px;
+      font-size: clamp(0.85rem, 0.65vw + 0.72rem, 1rem);
       color: var(--muted);
     }
     .result-list {
@@ -349,11 +517,11 @@
       display: flex;
       justify-content: space-between;
       gap: 10px;
-      padding: 8px 10px;
-      border-radius: 4px;
+      padding: clamp(10px, 1.2vw, 14px) clamp(12px, 1.5vw, 16px);
+      border-radius: 6px;
       background: #fafafa;
       border: 1px solid var(--border);
-      font-size: 12px;
+      font-size: clamp(0.82rem, 0.7vw + 0.7rem, 1rem);
       line-height: 1.45;
     }
 
@@ -374,14 +542,14 @@
       align-items: center;
       gap: 8px;
       margin-bottom: 8px;
-      font-size: 13px;
+      font-size: clamp(0.85rem, 0.65vw + 0.72rem, 1.05rem);
     }
     .badge {
       display: inline-flex;
       align-items: center;
       padding: 2px 7px;
       border-radius: 4px;
-      font-size: 11px;
+      font-size: clamp(0.7rem, 0.5vw + 0.6rem, 0.85rem);
       font-weight: 600;
     }
     .ready {
@@ -432,9 +600,6 @@
     }
 
     @media (max-width: 980px) {
-      .layout {
-        grid-template-columns: 1fr;
-      }
       .radar-status {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
@@ -454,34 +619,21 @@
     }
 
     .hero {
-      text-align: center;
-      padding: 44px 20px 36px;
-      margin: 0 -4px 8px;
-      border-radius: 20px;
-      background: linear-gradient(165deg, #ffffff 0%, #f5f5f7 55%, #eef2ff 100%);
-      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset, 0 12px 40px -18px rgba(0, 0, 0, 0.12);
-    }
-    .hero h1 {
-      margin: 0 0 10px;
-      font-size: clamp(1.75rem, 4vw, 2.25rem);
-      font-weight: 600;
-      letter-spacing: -0.03em;
-      color: var(--text);
-    }
-    .hero .lede {
-      margin: 0 auto 20px;
-      max-width: 36rem;
-      font-size: 0.9375rem;
-      line-height: 1.55;
-      color: var(--muted);
+      text-align: left;
+      padding: 12px 14px 14px;
+      margin: 0 0 12px;
+      border-radius: var(--radius-panel);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
     }
     .live-age-strip {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
-      justify-content: center;
+      justify-content: flex-start;
       align-items: center;
-      min-height: 40px;
+      min-height: 36px;
     }
     .live-empty {
       font-size: 0.8125rem;
@@ -490,11 +642,11 @@
     .age-pill {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      padding: 8px 14px;
+      gap: clamp(6px, 1vw, 10px);
+      padding: clamp(8px, 1vw, 12px) clamp(14px, 2vw, 22px);
       border-radius: 100px;
-      font-size: 0.8125rem;
-      font-weight: 500;
+      font-size: clamp(0.85rem, 0.75vw + 0.7rem, 1.12rem);
+      font-weight: 600;
       background: rgba(255, 255, 255, 0.85);
       border: 1px solid var(--border-strong);
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
@@ -514,64 +666,63 @@
     .action-row {
       display: flex;
       flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 16px;
+      gap: clamp(10px, 1.5vw, 16px);
+      margin-top: clamp(8px, 1.2vw, 16px);
       align-items: center;
     }
     .btn-primary {
       background: var(--focus);
       color: #fff;
-      border-color: var(--focus);
+      border-color: #1d4ed8;
     }
     .btn-primary:hover:not(:disabled) {
-      background: #0077ed;
-      border-color: #0077ed;
+      background: #1d4ed8;
+      border-color: #1e3a8a;
     }
 
-    details.disclosure {
+    .section-block {
+      margin-top: 18px;
+      padding: 14px 16px 16px;
+      border-radius: var(--radius-panel);
       border: 1px solid var(--border);
-      border-radius: 12px;
       background: var(--surface);
-      margin-top: 14px;
-      overflow: hidden;
     }
-    details.disclosure > summary {
-      list-style: none;
-      cursor: pointer;
-      padding: 12px 14px;
-      font-size: 0.8125rem;
-      font-weight: 600;
+    .section-enroll-top {
+      margin-top: 0;
+      margin-bottom: 4px;
+      border-width: 2px;
+      border-color: #bfdbfe;
+      background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    }
+    .section-enroll-top .section-heading {
+      font-size: 1.0625rem;
+    }
+    .section-heading {
+      margin: 0 0 12px;
+      font-size: 0.9375rem;
+      font-weight: 700;
       color: var(--text);
+      letter-spacing: -0.01em;
       display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      user-select: none;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 8px 12px;
     }
-    details.disclosure > summary::-webkit-details-marker {
-      display: none;
+    .section-tag {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #1e40af;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      padding: 2px 8px;
+      border-radius: 6px;
     }
-    details.disclosure > summary::after {
-      content: "";
-      width: 8px;
-      height: 8px;
-      border-right: 2px solid var(--muted);
-      border-bottom: 2px solid var(--muted);
-      transform: rotate(45deg);
-      transition: transform 0.2s ease;
-      flex-shrink: 0;
-    }
-    details.disclosure[open] > summary::after {
-      transform: rotate(225deg);
-      margin-top: 4px;
-    }
-    .disclosure-body {
-      padding: 0 14px 14px;
-      border-top: 1px solid var(--border);
+    .section-body {
+      margin: 0;
     }
     .chev-note {
       font-size: 0.75rem;
-      font-weight: 500;
+      font-weight: 600;
       color: var(--muted);
     }
 
@@ -630,13 +781,105 @@
       margin-top: 8px;
     }
 
+    .session-banner {
+      margin: 0 0 clamp(16px, 2vw, 26px);
+      padding: clamp(14px, 2vw, 22px) clamp(16px, 2.5vw, 28px);
+      border-radius: var(--radius-panel);
+      border: 1px solid var(--border);
+      background: var(--surface);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .session-banner--idle {
+      border-color: var(--border-strong);
+    }
+    .session-banner--enroll {
+      border-color: rgba(255, 149, 0, 0.45);
+      box-shadow: 0 0 0 1px rgba(255, 149, 0, 0.12);
+      animation: sessionPulse 2.2s ease-in-out infinite;
+    }
+    .session-banner--recognize {
+      border-color: rgba(52, 199, 89, 0.5);
+      box-shadow: 0 0 0 1px rgba(52, 199, 89, 0.12);
+    }
+    @keyframes sessionPulse {
+      0%, 100% { box-shadow: 0 0 0 1px rgba(255, 149, 0, 0.08); }
+      50% { box-shadow: 0 4px 20px rgba(255, 149, 0, 0.15); }
+    }
+    .session-banner-inner {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px 14px;
+    }
+    .session-badge {
+      font-size: clamp(0.72rem, 0.5vw + 0.65rem, 0.95rem);
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: clamp(5px, 0.6vw, 8px) clamp(11px, 1.2vw, 16px);
+      border-radius: 100px;
+      background: #f5f5f7;
+      color: var(--muted);
+    }
+    .session-banner--enroll .session-badge {
+      background: rgba(255, 149, 0, 0.15);
+      color: #c2410c;
+    }
+    .session-banner--recognize .session-badge {
+      background: rgba(52, 199, 89, 0.15);
+      color: #15803d;
+    }
+    .session-detail {
+      flex: 1;
+      min-width: min(100%, 12rem);
+      font-size: clamp(0.92rem, 0.85vw + 0.72rem, 1.22rem);
+      color: var(--text);
+      line-height: 1.45;
+    }
+    .session-progress-wrap {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .session-progress {
+      flex: 1;
+      min-width: 140px;
+      height: 8px;
+      border-radius: 100px;
+      background: #e8e8ed;
+      overflow: hidden;
+    }
+    .session-progress-bar {
+      height: 100%;
+      width: 0%;
+      border-radius: 100px;
+      background: linear-gradient(90deg, #ff9500, #ffb340);
+      transition: width 0.25s ease;
+    }
+    .session-progress-text {
+      font-size: clamp(0.85rem, 0.75vw + 0.72rem, 1.05rem);
+      font-weight: 600;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .camera-section[hidden] {
+      display: none !important;
+    }
+    .camera-section:not([hidden]) {
+      margin-bottom: clamp(12px, 1.8vw, 22px);
+    }
+
     .panel-main.panel-elevated {
-      border-radius: 16px;
-      box-shadow: 0 2px 24px rgba(0, 0, 0, 0.04);
+      border-radius: var(--radius-panel);
+      box-shadow: 0 4px 36px rgba(0, 0, 0, 0.06);
     }
     .panel-side {
       position: sticky;
-      top: 16px;
+      top: clamp(12px, 2vw, 28px);
+      align-self: start;
     }
     .profiles.compact-grid {
       gap: 10px;
@@ -646,57 +889,92 @@
 <body>
   <div class="container">
     <header class="hero">
-      <h1>生命体征与人脸识别</h1>
-      <p class="lede">摄像与面容算法运行于本机；毫米波数据由树莓派采集并经本页展示。待机时也会实时估计年龄段，无需先点「识别」。</p>
+      <div class="brand-row">
+        <div class="brand">
+          <span class="brand-badge" aria-hidden="true">FYP</span>
+          <div>
+            <p class="brand-kicker">非医疗器械 · 毕设演示</p>
+            <h1 class="brand-title">非接触生理感知与人脸识别</h1>
+          </div>
+        </div>
+        <nav class="nav-actions" aria-label="主要操作">
+          <button type="button" class="btn-primary" onclick="startRecognize()">开始识别</button>
+          <button type="button" class="btn-danger" onclick="stopAll()">停止</button>
+          <button type="button" class="btn-quiet" onclick="refreshStatus()">刷新</button>
+          <a class="btn-quiet" href="/readme">项目说明</a>
+        </nav>
+      </div>
+      <p class="sensor-line">视频与算法：<span id="sensor-chip">检测中…</span></p>
       <div class="live-age-strip" id="live-age-strip" aria-live="polite">
-        <span class="live-empty">连接视频流后，此处显示实时年龄段估计…</span>
+        <span class="live-empty">年龄段估计加载中…</span>
       </div>
     </header>
 
+    <div class="layout layout-enroll-first">
+      <section class="section-block section-enroll-top" id="profiles-section">
+        <h2 class="section-heading">录入 <span class="section-tag" id="profiles-summary-note">—</span></h2>
+        <p class="hint" style="margin:0 0 12px;">选择槽位并点击「录入」采集人脸；完成后可在下方开始识别。</p>
+        <div class="section-body">
+          <div class="profiles compact-grid" id="profiles"></div>
+        </div>
+      </section>
+    </div>
+
+    <div id="session-banner" hidden class="session-banner session-banner--idle" role="status">
+      <div class="session-banner-inner">
+        <span id="session-badge" class="session-badge">待机</span>
+        <p id="session-detail" class="session-detail">就绪</p>
+        <div id="session-progress-wrap" class="session-progress-wrap" style="display: none;">
+          <div class="session-progress"><div id="session-progress-bar" class="session-progress-bar"></div></div>
+          <span id="session-progress-text" class="session-progress-text"></span>
+        </div>
+      </div>
+    </div>
+
     <div class="layout">
       <section class="panel panel-main panel-elevated">
-        <div class="panel-label">画面</div>
-        <div class="video-dual">
-          <div class="video-wrap">
-            <span class="video-chip">RGB</span>
-            <img src="/video_feed" alt="RGB 视频流" />
+        <div id="camera-section" class="camera-section" hidden>
+          <div class="panel-label">实时画面</div>
+          <div id="video-dual-wrap" class="video-dual video-dual-rgb-only">
+            <div class="video-wrap">
+              <span class="video-chip">画面</span>
+              <img id="video-feed-rgb" alt="摄像头画面" />
+            </div>
           </div>
-          <div class="video-wrap">
-            <span class="video-chip">深度（对齐彩色）</span>
-            <img src="/video_depth" alt="深度伪彩" />
-          </div>
-        </div>
-        <div class="action-row">
-          <button type="button" class="btn-primary" onclick="startRecognize()">开始识别</button>
-          <button type="button" class="btn-danger" onclick="stopAll()">停止</button>
-          <button type="button" class="btn-quiet" onclick="refreshStatus()">刷新状态</button>
         </div>
 
-        <details class="disclosure" id="sec-vitals" open>
-          <summary>视觉心率与呼吸 <span class="chev-note">PhysFormer / ROI</span></summary>
-          <div class="disclosure-body">
-            <div class="message" id="vitals-panel" style="font-size:13px;line-height:1.55;">加载中…</div>
+        <div class="result-card unknown" id="recognition-card">
+          <p class="result-label">识别结果</p>
+          <h2 class="result-name" id="recognition-name">待机</h2>
+          <div class="result-score" id="recognition-score">年龄段在上方条带；开始识别后在此显示姓名与相似度</div>
+          <div class="result-list" id="recognition-list"></div>
+        </div>
+
+        <section class="section-block" id="sec-vitals">
+          <h2 class="section-heading">视觉心率与呼吸 <span class="section-tag">PhysFormer · ROI</span></h2>
+          <div class="section-body">
+            <div class="message" id="vitals-panel">加载中…</div>
             <p class="hint" style="margin-top:10px;">录入时请单人入镜，距离约 0.5–1.5 m。心率需凑满缓冲帧；呼吸为简易辅助估计。</p>
           </div>
-        </details>
+        </section>
 
-        <details class="disclosure" id="sec-fusion" open>
-          <summary>多人融合 <span class="chev-note">深度 ↔ 雷达距离门</span></summary>
-          <div class="disclosure-body">
-            <div class="message" id="fusion-panel" style="font-size:12px;line-height:1.45;">加载中…</div>
-            <p class="hint" style="margin:10px 0 0; font-size:12px; color:#52525b;">深度区间映射到雷达通道并贪心配对（<code>vitals_fusion.assignment</code>）。可通过环境变量调整场景深度窗与匹配策略。</p>
+        <section class="section-block" id="sec-fusion">
+          <h2 class="section-heading">多人融合 <span class="section-tag">深度 ↔ 雷达距离门</span></h2>
+          <div class="section-body">
+            <div class="message" id="fusion-panel">加载中…</div>
+            <p class="hint hint-secondary" style="margin:10px 0 0;">深度区间映射到雷达通道并贪心配对（<code>vitals_fusion.assignment</code>）。可通过环境变量调整场景深度窗与匹配策略。</p>
           </div>
-        </details>
+        </section>
 
-        <details class="disclosure" id="sec-radar">
-          <summary>毫米波雷达 <span class="chev-note">波形与指标</span></summary>
-          <div class="disclosure-body">
-            <p class="hint" style="margin:0 0 8px; color:#52525b; font-size:13px;">
+        <section class="section-block" id="sec-radar">
+          <h2 class="section-heading">毫米波雷达 <span class="section-tag">波形与指标</span></h2>
+          <div class="section-body">
+            <p class="hint hint-secondary" style="margin:0 0 8px;">
               256 距离门分段估计呼吸/心率；主指标仍为胸部平均门。
             </p>
-            <div class="message" id="radar-fusion-hint" style="font-size:12px; margin-bottom:8px; color:#3f3f46;">—</div>
+            <div class="message" id="radar-fusion-hint" style="margin-bottom:8px; color:#334155;">—</div>
             <div class="radar-head">
-              <h2>呼吸与心率</h2>
+              <span class="panel-label" style="margin-bottom:0;">雷达 · 呼吸与心率</span>
               <div class="radar-toolbar">
                 <button type="button" class="btn-primary" onclick="startRadarPi()">启动雷达</button>
                 <button type="button" class="btn-danger" onclick="stopRadarPi()">停止雷达</button>
@@ -731,57 +1009,47 @@
                 <div class="chart-box"><canvas id="chart-phase"></canvas></div>
               </div>
           <div class="radar-chart-card">
-            <h3>呼吸波形 <span style="font-weight:400;color:#71717a;font-size:11px">单人主通道 · 多人多分距离门</span></h3>
+            <h3>呼吸波形 <span class="chart-subtitle">单人主通道 · 多人多分距离门</span></h3>
             <div class="chart-box"><canvas id="chart-breath"></canvas></div>
           </div>
           <div class="radar-chart-card">
-            <h3>心率波形 <span style="font-weight:400;color:#71717a;font-size:11px">单人主通道 · 多人多分距离门</span></h3>
+            <h3>心率波形 <span class="chart-subtitle">单人主通道 · 多人多分距离门</span></h3>
             <div class="chart-box"><canvas id="chart-heart"></canvas></div>
           </div>
             </div>
             <div id="radar-waveform-key" class="radar-waveform-key" style="display:none;" aria-live="polite"></div>
-            <p class="hint" style="margin-top:12px;">服务端设置 <code>RADAR_PI_BASE=http://&lt;树莓派IP&gt;:5000</code>；树莓派运行 <code>shumeipai.py</code>。</p>
+            <p class="hint" style="margin-top:12px;">树莓派运行 <code>shumeipai.py</code>；上位机 <code>RADAR_PI_BASE=http://10.162.133.43:5000</code>；摄像头插在树莓派时上位机设 <code>USE_PI_CAMERA=1</code>。</p>
           </div>
-        </details>
+        </section>
       </section>
-
-      <aside class="panel panel-side">
-        <div class="panel-label">会话</div>
-        <div class="status">
-          <div class="metric">
-            <small>模式</small>
-            <strong id="mode">idle</strong>
-          </div>
-          <div class="metric">
-            <small>已建档</small>
-            <strong><span id="ready-count">0</span>/<span id="max-count">10</span></strong>
-          </div>
-          <div class="metric">
-            <small>采样目标</small>
-            <strong id="target-samples">20</strong>
-          </div>
-        </div>
-        <div class="message" id="status">等待操作</div>
-        <div class="result-card unknown" id="recognition-card">
-          <p class="result-label">识别结果</p>
-          <h2 class="result-name" id="recognition-name">待机</h2>
-          <div class="result-score" id="recognition-score">上方条带已显示实时年龄段；点「开始识别」可比对档案</div>
-          <div class="result-list" id="recognition-list"></div>
-        </div>
-
-        <details class="disclosure" id="profiles-details">
-          <summary>面容档案 <span class="chev-note" id="profiles-summary-note">—</span></summary>
-          <div class="disclosure-body">
-            <div class="profiles compact-grid" id="profiles"></div>
-          </div>
-        </details>
-      </aside>
     </div>
+
+    <footer class="site-footer">
+      <div class="footer-grid">
+        <div>
+          <h4>系统做什么</h4>
+          <p>面向摄像头估计年龄段，支持人脸录入与身份比对；可选结合毫米波雷达做呼吸/心率展示与多模态融合。仅供科研演示，非诊断用途。</p>
+        </div>
+        <div>
+          <h4>建议使用步骤</h4>
+          <ol>
+            <li>在顶部「录入」选择槽位并完成人脸采集；</li>
+            <li>需要时点击「开始识别」比对姓名；</li>
+            <li>雷达与生理曲线在页面下方查看。</li>
+          </ol>
+        </div>
+        <div>
+          <h4>部署架构</h4>
+          <p>浏览器访问<strong>上位机</strong>（本机运行 <code>face_app.py</code>）。树莓派采集 USB 摄像头与雷达串口并转发；若设置 <code>USE_PI_CAMERA=1</code>，视频算法仍在<span class="footer-em">上位机</span>执行。</p>
+        </div>
+      </div>
+      <p class="footer-copy">毕业设计 · 本地局域网运行 · 详细引用与模型说明见「项目说明」</p>
+    </footer>
   </div>
 
   <dialog id="enroll-modal" class="modal-native">
     <div class="modal-card">
-      <h3>录入档案</h3>
+      <h3>录入</h3>
       <p class="modal-hint">单人入镜、光线均匀。名称仅用于展示；参考年龄可选，用于评估预测是否落在正确年龄段。</p>
       <label for="enroll-name-input">姓名或备注</label>
       <input type="text" id="enroll-name-input" maxlength="40" placeholder="例如：张三" autocomplete="name" />
@@ -801,6 +1069,7 @@
     let chartHeart = null;
     let enrollTargetPerson = null;
     let lastRadarPayload = null;
+    let cameraLiveActive = false;
 
     const chartLineMuted = ['#3f3f46', '#52525b', '#71717a'];
     const radarPalette = ['#0071e3', '#34c759', '#af52de', '#ff9500', '#ff3b30'];
@@ -924,7 +1193,7 @@
             idx % 2 === 1
               ? `width:32px;border-top:3px dashed ${col};height:0;margin-top:10px;background:transparent;`
               : `width:32px;height:3px;background:${col};border-radius:2px;margin-top:8px;`;
-          return `<div class="rwk-row"><span class="rwk-swatch" style="${sw}"></span><span><strong>${dash}</strong> — ${txt}<br/><span style="color:#71717a;font-size:11px;">与上方呼吸/心率图中所选颜色一致；「槽位」与「多人融合」表第一列相同（按深度由近到远）。</span></span></div>`;
+          return `<div class="rwk-row"><span class="rwk-swatch" style="${sw}"></span><span><strong>${dash}</strong> — ${txt}<br/><span class="rwk-note">与上方呼吸/心率图中所选颜色一致；「槽位」与「多人融合」表第一列相同（按深度由近到远）。</span></span></div>`;
         })
         .join('');
       el.innerHTML =
@@ -1085,7 +1354,7 @@
     }
 
     async function deleteProfile(person, label) {
-      if (!confirm(`确认删除「${label}」的面容档案吗？`)) return;
+      if (!confirm(`确认删除槽位「${label}」的录入数据吗？`)) return;
       await callApi('/api/profile/delete', { person });
       await refreshStatus();
     }
@@ -1106,7 +1375,7 @@
       const lp = s.live_preview || {};
       const faces = Array.isArray(lp.faces) ? lp.faces : [];
       if (!faces.length) {
-        el.innerHTML = '<span class="live-empty">对准摄像头后，此处显示每张脸的年龄段估计（无需先点识别）</span>';
+        el.innerHTML = '<span class="live-empty">等待面部检测结果…</span>';
         return;
       }
       el.innerHTML = faces.map((f) => {
@@ -1128,7 +1397,9 @@
 
       const ready = s.ready_count || 0;
       const note = document.getElementById('profiles-summary-note');
-      if (note) note.textContent = `已建档 ${ready}/${s.max_profiles || 10}`;
+      if (note) {
+        note.textContent = `已录入 ${ready}/${s.max_profiles || 10} · 每档 ${s.target_samples ?? 20} 帧`;
+      }
 
       const root = document.getElementById('profiles');
       root.innerHTML = '';
@@ -1142,7 +1413,7 @@
         card.innerHTML = `
           <div class="profile-head">
             <strong>${profile.label}</strong>
-            <span class="badge ${profile.ready ? 'ready' : 'not-ready'}">${profile.ready ? '已建档' : '空槽'}</span>
+            <span class="badge ${profile.ready ? 'ready' : 'not-ready'}">${profile.ready ? '已录入' : '空槽'}</span>
           </div>
           <div class="progress"><div class="bar" style="width: ${progress}%"></div></div>
           <div class="profile-actions">
@@ -1173,7 +1444,7 @@
       if (labels.length > 0) {
         score.textContent = `检测到 ${labels.length} 张人脸`;
       } else if (s.mode !== 'recognize') {
-        score.textContent = '顶部条带持续显示年龄段；点「开始识别」后在此比对姓名档案';
+        score.textContent = '上方条带显示年龄段；点「开始识别」后在此比对姓名';
       } else {
         score.textContent = '面向摄像头，保持面部清晰';
       }
@@ -1199,15 +1470,81 @@
       });
     }
 
+    function syncLiveCamera(s) {
+      const mode = s.mode || 'idle';
+      const on = mode === 'enroll' || mode === 'recognize';
+      const section = document.getElementById('camera-section');
+      const rgb = document.getElementById('video-feed-rgb');
+      if (!section) return;
+      if (on) {
+        section.removeAttribute('hidden');
+        if (!cameraLiveActive) {
+          const bust = Date.now();
+          if (rgb) rgb.src = '/video_feed?' + bust;
+        }
+        cameraLiveActive = true;
+      } else {
+        cameraLiveActive = false;
+        section.setAttribute('hidden', '');
+        if (rgb) rgb.removeAttribute('src');
+      }
+    }
+
+    function updateSessionChrome(s) {
+      const banner = document.getElementById('session-banner');
+      const badge = document.getElementById('session-badge');
+      const detail = document.getElementById('session-detail');
+      const pw = document.getElementById('session-progress-wrap');
+      const bar = document.getElementById('session-progress-bar');
+      const pt = document.getElementById('session-progress-text');
+      if (!banner || !badge || !detail) return;
+      const mode = s.mode || 'idle';
+      banner.hidden = mode === 'idle';
+      banner.className = 'session-banner session-banner--' + mode;
+      if (mode === 'enroll') {
+        badge.textContent = '录入';
+        const nm = s.enrolling_display_name ? `「${s.enrolling_display_name}」` : '';
+        detail.textContent = [nm, s.status_text].filter(Boolean).join(' ').trim() || '录入中…';
+        const ep = s.enroll_person;
+        const prof = ep && s.profiles ? s.profiles.find((p) => p.id === ep) : null;
+        const tgt = s.target_samples || 20;
+        const samp = prof ? prof.samples : 0;
+        const prog = tgt > 0 ? Math.min(100, Math.round((samp / tgt) * 100)) : 0;
+        if (pw && bar && pt) {
+          pw.style.display = 'flex';
+          bar.style.width = prog + '%';
+          pt.textContent = `${samp} / ${tgt} 采样`;
+        }
+      } else if (mode === 'recognize') {
+        badge.textContent = '识别';
+        const labs =
+          s.last_recognition &&
+          Array.isArray(s.last_recognition.labels) &&
+          s.last_recognition.labels.length
+            ? `识别到：${s.last_recognition.labels.join(' · ')}`
+            : '';
+        detail.textContent = (labs || s.status_text || '').trim();
+        if (pw) pw.style.display = 'none';
+      } else {
+        badge.textContent = '待机';
+        detail.textContent = '';
+        if (pw) pw.style.display = 'none';
+      }
+    }
+
     async function refreshStatus() {
       const resp = await fetch('/api/status');
       const s = await resp.json();
       latestStatus = s;
-      document.getElementById('mode').textContent = s.mode;
-      document.getElementById('status').textContent = s.status_text;
-      document.getElementById('ready-count').textContent = s.ready_count;
-      document.getElementById('max-count').textContent = s.max_profiles;
-      document.getElementById('target-samples').textContent = s.target_samples;
+      const chip = document.getElementById('sensor-chip');
+      if (chip) {
+        const sens = s.sensor || {};
+        if (sens.camera_backend === 'pi_http') {
+          chip.textContent = '树莓派摄像头推流 · 识别与生理算法在本机运行';
+        } else {
+          chip.textContent = '本机 Intel RealSense · 识别与生理算法在本机（后台仍使用深度数据）';
+        }
+      }
       renderLivePreview(s);
       renderRecognition(s);
       renderProfiles(s);
@@ -1275,14 +1612,14 @@
               typeof p.face_index === 'number' && recLabs[p.face_index]
                 ? String(recLabs[p.face_index])
                 : '—';
-            return `<tr><td>${p.slot}<div style="font-size:11px;color:#52525b;margin-top:2px;">${nm}</div></td><td>${d}</td><td>${bins}</td><td>${fh}</td><td>${fr}</td><td>${vh}</td><td>${vr}</td><td>${rhv}</td><td>${rr}</td></tr>`;
+            return `<tr><td>${p.slot}<div class="slot-sub">${nm}</div></td><td>${d}</td><td>${bins}</td><td>${fh}</td><td>${fr}</td><td>${vh}</td><td>${vr}</td><td>${rhv}</td><td>${rr}</td></tr>`;
           }).join('');
           const fm = fusion.fusion_model ? ` · ${fusion.fusion_model}` : '';
           const sc = (fusion.depth_scene_m && fusion.depth_scene_m.length === 2)
             ? ` · 场景深度窗 [${fusion.depth_scene_m[0]}, ${fusion.depth_scene_m[1]}] m`
             : '';
           const dm = fusion.use_depth_bin_match === false ? '（已关闭深度-通道匹配）' : '';
-          fp.innerHTML = `<table style="width:100%; border-collapse:collapse; font-size:12px;"><thead><tr><th align="left">槽 / 识别名</th><th align="left">深度</th><th align="left">雷达 bin</th><th align="left">融合 HR</th><th align="left">融合 RR</th><th align="left">视 HR</th><th align="left">视 RR</th><th align="left">雷达 HR</th><th align="left">雷达 RR</th></tr></thead><tbody>${rows}</tbody></table><div style="margin-top:6px; color:#71717a;">雷达通道数：${nCh} · ${fusion.assignment || '—'}${sc}${dm}${fm}</div>`;
+          fp.innerHTML = `<div class="fusion-table-wrap"><table><thead><tr><th align="left">槽 / 识别名</th><th align="left">深度</th><th align="left">雷达 bin</th><th align="left">融合 HR</th><th align="left">融合 RR</th><th align="left">视 HR</th><th align="left">视 RR</th><th align="left">雷达 HR</th><th align="left">雷达 RR</th></tr></thead><tbody>${rows}</tbody></table></div><div class="fusion-meta">雷达通道数：${nCh} · ${fusion.assignment || '—'}${sc}${dm}${fm}</div>`;
         }
       }
       if (rh) {
@@ -1295,6 +1632,8 @@
           rh.style.color = '#a1a1aa';
         }
       }
+      updateSessionChrome(s);
+      syncLiveCamera(s);
       updateRadarWaveformKey();
     }
 
@@ -1409,19 +1748,6 @@
     initRadarCharts();
     refreshRadar();
 
-    (function initUiPrefs() {
-      const pd = document.getElementById('profiles-details');
-      if (pd && localStorage.getItem('fyp-archive-open') === '0') pd.open = false;
-      pd?.addEventListener('toggle', () => {
-        localStorage.setItem('fyp-archive-open', pd.open ? '1' : '0');
-      });
-      ['sec-vitals', 'sec-fusion', 'sec-radar'].forEach((id) => {
-        const el = document.getElementById(id);
-        const key = 'fyp-open-' + id;
-        if (el && localStorage.getItem(key) === '0') el.open = false;
-        el?.addEventListener('toggle', () => localStorage.setItem(key, el.open ? '1' : '0'));
-      });
-    })();
   </script>
 </body>
 </html>

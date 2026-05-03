@@ -1,19 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-树莓派端：仅运行毫米波雷达算法（与 jianjie.py 一致）并提供 HTTP API。
-完整前端界面在上位机 templates/index.html（face_app）；显示器浏览器打开上位机地址。
-启动时可 POST 唤醒上位机 fyp_launcher.py 并尝试全屏打开 Chromium。
+树莓派端：毫米波雷达（与 jianjie.py 一致）+ USB 摄像头 MJPEG 推流；不做识别与生理推理。
+浏览器与算法在上位机 face_app；摄像头由树莓派采集，上位机通过 USE_PI_CAMERA=1 拉流。
+启动时可 POST 唤醒上位机 fyp_launcher 并尝试全屏打开 Chromium（与此前版本一致）。
 
-环境变量（均有默认，重启后也可直接: python3 shumeipai.py）：
-  FYP_PC_HOST=10.162.133.140   # 可选；不设则用下方代码内 _DEFAULT_PC_HOST 自动生成 UI/Launcher URL
-  FYP_UI_URL / FYP_LAUNCHER_URL  # 可选；单独指定则覆盖由 PC_HOST 拼出的地址
-  FYP_LAUNCHER_TOKEN=your_secret
-  FYP_OPEN_KIOSK=1   FYP_AUTO_START=1   FYP_SERIAL=/dev/ttyUSB0
+环境变量（均有默认，直接: python3 shumeipai.py）：
+  FYP_CAMERA_ENABLE=1（默认）  设为 0 可关闭摄像头推流（仅雷达）
+  FYP_CAMERA_MODE=auto       auto：优先 Intel RealSense（同 jianjie.py）；失败再试 USB 摄像头
+                             realsense：仅 RealSense   uvc：仅 OpenCV /dev/video*
+  FYP_CAMERA_INDEX / FYP_CAMERA_WIDTH / FYP_CAMERA_HEIGHT / FYP_CAMERA_FPS
+  FYP_CAMERA_DEVICE=          非空时直接打开该 V4L2 设备（如 /dev/video2），优先于索引
+  FYP_CAMERA_PROBE=1          为 0 时禁用自动探测 /dev/video*（仅用 INDEX）
+  FYP_REALSENSE_COLOR_ONLY=0  为 1 时跳过深度流（USB2/省电场景可试）
+  FYP_PC_HOST=10.162.133.140
+  FYP_UI_URL / FYP_LAUNCHER_URL   未单独设置时由 FYP_PC_HOST 自动拼出
+  FYP_LAUNCHER_TOKEN   FYP_OPEN_KIOSK=1   FYP_AUTO_START=1   FYP_SERIAL=/dev/ttyUSB0
 """
 
+import glob
 import math
 import os
+import re
+import sys
 import serial
 import subprocess
 import threading
@@ -22,13 +31,17 @@ import urllib.request
 from collections import deque
 from datetime import datetime
 
+import cv2
 import numpy as np
-from flask import Flask, jsonify
+from flask import Flask, Response, jsonify
 from scipy import signal
 
-# 上位机（笔记本）局域网 IPv4；换网络或电脑 IP 变了时只改这一处即可。
-_DEFAULT_PC_HOST = "10.162.133.140"
+try:
+    cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
+except Exception:
+    pass
 
+_DEFAULT_PC_HOST = "10.162.133.140"
 _PC_HOST = (os.environ.get("FYP_PC_HOST") or "").strip() or _DEFAULT_PC_HOST
 if _PC_HOST:
     if not (os.environ.get("FYP_UI_URL") or "").strip():
@@ -43,7 +56,393 @@ FYP_UI_URL = os.environ.get("FYP_UI_URL", "").strip().rstrip("/")
 FYP_LAUNCHER_URL = os.environ.get("FYP_LAUNCHER_URL", "").strip().rstrip("/")
 FYP_LAUNCHER_TOKEN = os.environ.get("FYP_LAUNCHER_TOKEN", "").strip()
 
+# USB 摄像头推流给上位机（默认开启；设 FYP_CAMERA_ENABLE=0 仅雷达）
+FYP_CAMERA_ENABLE = os.environ.get("FYP_CAMERA_ENABLE", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+)
+FYP_CAMERA_INDEX = int(os.environ.get("FYP_CAMERA_INDEX", "0"))
+FYP_CAMERA_WIDTH = int(os.environ.get("FYP_CAMERA_WIDTH", "640"))
+FYP_CAMERA_HEIGHT = int(os.environ.get("FYP_CAMERA_HEIGHT", "480"))
+FYP_CAMERA_FPS = int(os.environ.get("FYP_CAMERA_FPS", "30"))
+# auto | realsense | uvc — 与 jianjie.py 一致时 D435 用 realsense，不是 /dev/video0
+FYP_CAMERA_MODE = (os.environ.get("FYP_CAMERA_MODE") or "auto").strip().lower()
+
+_cam_lock = threading.Lock()
+_latest_jpeg = None
+_latest_depth_jpeg = None
+_DEPTH_NA_JPEG_CACHE = None
+# 旧版固定 alpha 易使远距离深度整幅发黑；现改为分位归一化伪彩
+_cam_running = False
+_cam_thread = None
+
 app = Flask(__name__)
+
+
+def _jpeg_placeholder_no_camera():
+    """摄像头打不开时也推送有效 JPEG，便于上位机 OpenCV 拉到 MJPEG（否则会长期黑屏）。"""
+    img = np.zeros((FYP_CAMERA_HEIGHT, FYP_CAMERA_WIDTH, 3), dtype=np.uint8)
+    img[:] = (42, 42, 48)
+    msg = "No camera — RealSense? use FYP_CAMERA_MODE=realsense  USB? ls /dev/video* idx=%s" % (
+        FYP_CAMERA_INDEX,
+    )
+    cv2.putText(
+        img,
+        msg[:72],
+        (12, FYP_CAMERA_HEIGHT // 2),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.45,
+        (220, 220, 230),
+        1,
+        cv2.LINE_AA,
+    )
+    ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 78])
+    return buf.tobytes() if ok else None
+
+
+def _depth_uint16_to_colormap_bgr(depth_uint16: np.ndarray) -> np.ndarray:
+    """16 位深度 → TURBO 伪彩；按有效像素分位拉伸，避免画面一片黑。"""
+    d = depth_uint16.astype(np.float32)
+    valid = d > 0
+    h, w = d.shape[:2]
+    if not np.any(valid):
+        return np.zeros((h, w, 3), dtype=np.uint8)
+    lo = float(np.percentile(d[valid], 5))
+    hi = float(np.percentile(d[valid], 95))
+    if hi <= lo + 1e-3:
+        hi = lo + 1.0
+    scaled = (d - lo) / (hi - lo) * 255.0
+    u8 = np.clip(scaled, 0, 255).astype(np.uint8)
+    u8[~valid] = 0
+    return cv2.applyColorMap(u8, cv2.COLORMAP_TURBO)
+
+
+def _jpeg_depth_na():
+    """无深度流时仍输出可读 JPEG（UVC / color-only RealSense）。"""
+    global _DEPTH_NA_JPEG_CACHE
+    if _DEPTH_NA_JPEG_CACHE is not None:
+        return _DEPTH_NA_JPEG_CACHE
+    img = np.zeros((FYP_CAMERA_HEIGHT, FYP_CAMERA_WIDTH, 3), dtype=np.uint8)
+    img[:] = (26, 26, 32)
+    cv2.putText(
+        img,
+        "Depth N/A (USB cam or color-only)",
+        (12, FYP_CAMERA_HEIGHT // 2 - 10),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.52,
+        (180, 180, 190),
+        1,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        img,
+        "RealSense depth: use depth+color on Pi",
+        (12, FYP_CAMERA_HEIGHT // 2 + 22),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.42,
+        (130, 130, 145),
+        1,
+        cv2.LINE_AA,
+    )
+    ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 76])
+    _DEPTH_NA_JPEG_CACHE = buf.tobytes() if ok else None
+    return _DEPTH_NA_JPEG_CACHE
+
+
+def _sorted_video_dev_paths():
+    paths = glob.glob("/dev/video*")
+
+    def _key(p):
+        m = re.search(r"(\d+)$", p)
+        return int(m.group(1)) if m else 0
+
+    return sorted(paths, key=_key)
+
+
+def _open_usb_camera():
+    """Linux 上优先 V4L2；可选显式设备路径或自动探测第一个能出画的 /dev/video*。"""
+    device = (os.environ.get("FYP_CAMERA_DEVICE") or "").strip()
+    probe = os.environ.get("FYP_CAMERA_PROBE", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+    )
+    if device:
+        try:
+            cap = (
+                cv2.VideoCapture(device, cv2.CAP_V4L2)
+                if sys.platform.startswith("linux")
+                else cv2.VideoCapture(device)
+            )
+            if cap.isOpened():
+                print("[CAMERA] UVC 使用 FYP_CAMERA_DEVICE=%s" % device)
+                return cap
+            cap.release()
+        except Exception:
+            pass
+        print("[CAMERA] 无法打开 FYP_CAMERA_DEVICE=%s，将尝试索引/探测" % device)
+
+    idx = FYP_CAMERA_INDEX
+    if sys.platform.startswith("linux") and probe:
+        for path in _sorted_video_dev_paths():
+            try:
+                cap = cv2.VideoCapture(path, cv2.CAP_V4L2)
+                if not cap.isOpened():
+                    cap.release()
+                    continue
+                ok, frame = cap.read()
+                if ok and frame is not None and getattr(frame, "size", 0) > 0:
+                    print("[CAMERA] UVC 自动探测使用 %s（可用 export FYP_CAMERA_DEVICE 固定）" % path)
+                    return cap
+                cap.release()
+            except Exception:
+                pass
+
+    if sys.platform.startswith("linux"):
+        try:
+            cap_v4l = cv2.VideoCapture(idx, cv2.CAP_V4L2)
+            if cap_v4l.isOpened():
+                return cap_v4l
+            cap_v4l.release()
+        except Exception:
+            pass
+    return cv2.VideoCapture(idx)
+
+
+def _uvc_camera_loop():
+    """普通 USB 摄像头：OpenCV + V4L2（与 jianjie.py 中 Intel RealSense 方案不同）。"""
+    global _latest_jpeg
+    cap = _open_usb_camera()
+    if cap.isOpened():
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, FYP_CAMERA_WIDTH)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FYP_CAMERA_HEIGHT)
+        try:
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception:
+            pass
+    else:
+        print(
+            "[CAMERA] UVC 无法打开索引 %s（若实际是 Intel RealSense，请用默认 FYP_CAMERA_MODE=auto）"
+            % FYP_CAMERA_INDEX
+        )
+    while _cam_running:
+        if not cap.isOpened():
+            pj = _jpeg_placeholder_no_camera()
+            if pj:
+                with _cam_lock:
+                    _latest_jpeg = pj
+            time.sleep(0.33)
+            continue
+        ok, frame = cap.read()
+        if ok:
+            if frame.shape[1] != FYP_CAMERA_WIDTH or frame.shape[0] != FYP_CAMERA_HEIGHT:
+                frame = cv2.resize(frame, (FYP_CAMERA_WIDTH, FYP_CAMERA_HEIGHT))
+            ok_j, buf = cv2.imencode(
+                ".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 82]
+            )
+            if ok_j:
+                with _cam_lock:
+                    _latest_jpeg = buf.tobytes()
+        else:
+            time.sleep(0.02)
+    cap.release()
+
+
+def _realsense_camera_loop():
+    """
+    与 jianjie.py 相同：pyrealsense2.pipeline + depth/color。
+    D435 插在树莓派上时一般走这里，而不是 /dev/video0。
+    """
+    global _latest_jpeg
+    try:
+        import pyrealsense2 as rs
+    except ImportError:
+        print(
+            "[CAMERA] 未找到 pyrealsense2。树莓派 ARM 上 PyPI 往往无预编译 wheel，"
+            "请勿依赖 pip；请按 README「RealSense 与树莓派」从 Intel 文档编译安装。"
+        )
+        return False
+
+    try:
+        ctx = rs.context()
+        n = len(list(ctx.query_devices()))
+        print("[CAMERA] RealSense 枚举设备数: %s" % n)
+        if n == 0:
+            print(
+                "[CAMERA] 提示：query_devices=0 时 pipeline 也会报 No device connected。"
+                "请插紧 USB3、检查供电与线缆；摄像头是否在 PC 上占用？运行 rs-enumerate-devices 核对。"
+            )
+    except Exception as ex:
+        print("[CAMERA] RealSense 枚举设备（可忽略）: %s" % ex)
+
+    pipeline = rs.pipeline()
+    w, h, fps = FYP_CAMERA_WIDTH, FYP_CAMERA_HEIGHT, FYP_CAMERA_FPS
+    color_only_pref = (os.environ.get("FYP_REALSENSE_COLOR_ONLY") or "0").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+    def _stop_safe():
+        try:
+            pipeline.stop()
+        except Exception:
+            pass
+
+    attempts = []
+    if not color_only_pref:
+
+        def _depth_color(c):
+            c.enable_stream(rs.stream.depth, w, h, rs.format.z16, fps)
+            c.enable_stream(rs.stream.color, w, h, rs.format.bgr8, fps)
+
+        attempts.append(("depth+color %dx%d@%d" % (w, h, fps), _depth_color))
+
+    def _color_wh(c):
+        c.enable_stream(rs.stream.color, w, h, rs.format.bgr8, fps)
+
+    attempts.append(("color-only %dx%d@%d" % (w, h, fps), _color_wh))
+    attempts.append(("color-only 424x240@15（兼容 USB2/带宽不足）", lambda c: c.enable_stream(rs.stream.color, 424, 240, rs.format.bgr8, 15)))
+
+    started = False
+    for label, setup in attempts:
+        cfg = rs.config()
+        try:
+            setup(cfg)
+            pipeline.start(cfg)
+            print(
+                "[CAMERA] Intel RealSense %s → MJPEG /camera/rgb + /camera/depth（深度+彩色时）"
+                % (label,)
+            )
+            started = True
+            break
+        except Exception as e:
+            print("[CAMERA] RealSense 尝试 [%s] 失败: %s" % (label, e))
+            _stop_safe()
+
+    if not started:
+        print(
+            "[CAMERA] RealSense 全部配置失败。若已装 pyrealsense2 仍如此，多为设备未连接或固件/USB；"
+            "可试 export FYP_REALSENSE_COLOR_ONLY=1 或换 USB3 口。"
+        )
+        return False
+    while _cam_running:
+        try:
+            frames = pipeline.wait_for_frames(timeout_ms=5000)
+        except Exception:
+            time.sleep(0.05)
+            continue
+        color_frame = frames.get_color_frame()
+        if not color_frame:
+            continue
+        frame = np.asanyarray(color_frame.get_data())
+        if frame.shape[1] != w or frame.shape[0] != h:
+            frame = cv2.resize(frame, (w, h))
+        ok_j, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
+        if not ok_j:
+            continue
+        depth_frame = frames.get_depth_frame()
+        with _cam_lock:
+            _latest_jpeg = buf.tobytes()
+            if depth_frame:
+                dimg = np.asanyarray(depth_frame.get_data())
+                if dimg.shape[1] != w or dimg.shape[0] != h:
+                    dimg = cv2.resize(dimg, (w, h))
+                depth_vis = _depth_uint16_to_colormap_bgr(dimg)
+                ok_d, buf_d = cv2.imencode(
+                    ".jpg",
+                    depth_vis,
+                    [int(cv2.IMWRITE_JPEG_QUALITY), 82],
+                )
+                _latest_depth_jpeg = buf_d.tobytes() if ok_d else None
+            else:
+                _latest_depth_jpeg = None
+    try:
+        pipeline.stop()
+    except Exception:
+        pass
+    return True
+
+
+def _camera_capture_loop():
+    mode = FYP_CAMERA_MODE
+    if mode == "uvc":
+        _uvc_camera_loop()
+        return
+    if mode == "realsense":
+        if not _realsense_camera_loop():
+            print("[CAMERA] RealSense 不可用，回退 UVC…")
+            _uvc_camera_loop()
+        return
+    # auto：与 jianjie 一致优先 RealSense（你的 D435）
+    if _realsense_camera_loop():
+        return
+    print("[CAMERA] RealSense 未就绪，回退 OpenCV USB 摄像头（V4L2）…")
+    _uvc_camera_loop()
+
+
+def start_pi_camera_thread():
+    global _cam_running, _cam_thread
+    if not FYP_CAMERA_ENABLE:
+        print("[CAMERA] 已通过 FYP_CAMERA_ENABLE=0 关闭摄像头采集")
+        return
+    if _cam_thread is not None:
+        return
+    _cam_running = True
+    _cam_thread = threading.Thread(target=_camera_capture_loop, daemon=True)
+    _cam_thread.start()
+    print(
+        "[CAMERA] 采集线程已启动（mode=%s）→ 上位机 RADAR_PI_BASE + USE_PI_CAMERA（config 已默认）"
+        % (FYP_CAMERA_MODE or "auto",)
+    )
+
+
+def camera_mjpeg_generator():
+    """multipart MJPEG，与上位机 OpenCV / 浏览器兼容。"""
+    while True:
+        with _cam_lock:
+            chunk = _latest_jpeg
+        if chunk:
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n"
+                + chunk
+                + b"\r\n"
+            )
+        time.sleep(1.0 / 24.0)
+
+
+def camera_depth_mjpeg_generator():
+    """深度伪彩 MJPEG；无深度流时用占位帧。"""
+    while True:
+        with _cam_lock:
+            chunk = _latest_depth_jpeg
+        out = chunk or _jpeg_depth_na()
+        if out:
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n"
+                + out
+                + b"\r\n"
+            )
+        time.sleep(1.0 / 24.0)
+
+
+@app.route("/camera/rgb")
+def camera_rgb_stream():
+    return Response(
+        camera_mjpeg_generator(),
+        mimetype="multipart/x-mixed-replace; boundary=frame",
+    )
+
+
+@app.route("/camera/depth")
+def camera_depth_stream():
+    return Response(
+        camera_depth_mjpeg_generator(),
+        mimetype="multipart/x-mixed-replace; boundary=frame",
+    )
 
 
 def _post_json(url, payload=b"{}"):
@@ -152,7 +551,9 @@ class BreathingHeartSystem:
         self._ema_br = None
         self._ema_hr = None
         self._ema_ch = {}
-        self._ema_alpha = 0.26
+        self._ema_alpha = 0.22
+        self._br_raw_window = deque(maxlen=7)
+        self._hr_raw_window = deque(maxlen=7)
         self.time_history = deque(maxlen=self.window_size)
 
         self.breathing_rate = 0.0
@@ -309,6 +710,22 @@ class BreathingHeartSystem:
             self.error_print("生命体征检测错误", e)
             return None
 
+    def _limit_rate_jump(self, prev_display: float, target: float, max_step: float):
+        """单帧输出限幅，抑制 FFT 尖峰导致的 BPM 猛跳。"""
+        try:
+            pv = float(prev_display)
+            tv = float(target)
+        except (TypeError, ValueError):
+            return float(target)
+        if pv <= 0 or math.isnan(pv):
+            return tv
+        if math.isnan(tv):
+            return pv
+        d = tv - pv
+        if abs(d) <= max_step:
+            return tv
+        return pv + math.copysign(max_step, d)
+
     def detect_vital_signs_with_stable_filtering(self):
         if len(self.phase_history) < self.sample_rate * 15:
             return None
@@ -316,10 +733,14 @@ class BreathingHeartSystem:
         res = self._compute_vitals_from_phase_array(phase_array, verbose_print=True)
         if res is None:
             return None
-        self._ema_br = self._ema_smooth_scalar(self._ema_br, res["breathing_rate"])
-        self._ema_hr = self._ema_smooth_scalar(self._ema_hr, res["heart_rate"])
-        self.breathing_rate = self._ema_br
-        self.heart_rate = self._ema_hr
+        self._br_raw_window.append(float(res["breathing_rate"]))
+        self._hr_raw_window.append(float(res["heart_rate"]))
+        br_in = float(np.median(self._br_raw_window))
+        hr_in = float(np.median(self._hr_raw_window))
+        self._ema_br = self._ema_smooth_scalar(self._ema_br, br_in)
+        self._ema_hr = self._ema_smooth_scalar(self._ema_hr, hr_in)
+        self.breathing_rate = self._limit_rate_jump(self.breathing_rate, self._ema_br, 1.8)
+        self.heart_rate = self._limit_rate_jump(self.heart_rate, self._ema_hr, 4.0)
         self.breathing_amplitude = res["breathing_amplitude"]
         self.heart_amplitude = res["heart_amplitude"]
         self.breathing_quality = res["breathing_quality"]
@@ -487,9 +908,9 @@ class BreathingHeartSystem:
         if rel <= 0.11:
             w_fft, w_ac = 0.52, 0.48
         elif rel <= 0.22:
-            w_fft, w_ac = 0.68, 0.32
+            w_fft, w_ac = 0.62, 0.38
         else:
-            w_fft, w_ac = 0.82, 0.18
+            w_fft, w_ac = 0.72, 0.28
         lo_bpm = low_f * 60.0
         hi_bpm = high_f * 60.0
         blend = w_fft * fft_bpm + w_ac * ac_bpm
@@ -626,6 +1047,8 @@ class BreathingHeartSystem:
         self._ema_br = None
         self._ema_hr = None
         self._ema_ch.clear()
+        self._br_raw_window.clear()
+        self._hr_raw_window.clear()
         self.time_history.clear()
         with self.data_lock:
             self.latest_phase_data = None
@@ -690,15 +1113,21 @@ breathing_system = BreathingHeartSystem()
 @app.route("/")
 def index():
     ui = FYP_UI_URL or "(请设置环境变量 FYP_UI_URL 为上位机 face_app 地址)"
+    cam_note = (
+        "摄像头 MJPEG：<code>/camera/rgb</code>、<code>/camera/depth</code>（RealSense 深度+彩色时）"
+        if FYP_CAMERA_ENABLE
+        else "摄像头已关闭（FYP_CAMERA_ENABLE=0）"
+    )
     return (
-        """<!DOCTYPE html><meta charset="utf-8"><title>树莓派雷达 API</title>
-<body style="font-family:sans-serif;padding:24px;">
-<h2>树莓派仅提供雷达串口与 API</h2>
-<p>请在显示器使用 Chromium 打开上位机统一界面：</p>
+        """<!DOCTYPE html><meta charset="utf-8"><title>树莓派采集端</title>
+<body style="font-family:sans-serif;padding:24px;max-width:720px;line-height:1.6;">
+<h2>树莓派采集端（雷达串口 + USB 摄像头）</h2>
+<p>请在显示器使用 Chromium 打开<strong>上位机</strong>统一界面：</p>
 <p><strong>%s</strong></p>
-<p>接口：<code>/api/radar</code>、<code>/api/start-radar</code>、<code>/api/stop-radar</code></p>
+<p>%s</p>
+<p>雷达接口：<code>/api/radar</code>、<code>/api/start-radar</code>、<code>/api/stop-radar</code></p>
 </body>"""
-        % (ui,)
+        % (ui, cam_note)
     )
 
 
@@ -727,8 +1156,10 @@ def stop_radar():
 
 
 if __name__ == "__main__":
-    print("树莓派雷达服务监听 %s:%s" % (HTTP_HOST, HTTP_PORT))
-    print("为上位机配置 RADAR_PI_BASE=http://<树莓派IP>:%s" % HTTP_PORT)
+    print("树莓派采集服务监听 %s:%s" % (HTTP_HOST, HTTP_PORT))
+    print("上位机示例：RADAR_PI_BASE=http://10.162.133.43:%s（换网段请改 IP）" % HTTP_PORT)
+    print("若摄像头插在树莓派：上位机设 USE_PI_CAMERA=1（并确保本机已开启摄像头采集）")
+    start_pi_camera_thread()
     if os.environ.get("FYP_AUTO_START", "1") == "1":
         threading.Thread(target=startup_sequence, daemon=True).start()
     try:

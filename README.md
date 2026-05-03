@@ -1,6 +1,27 @@
 # FYP：Intel RealSense D435 人体检测与多人脸识别
 
-本项目基于 **Intel RealSense D435** 彩色与深度流，结合 **YOLOv8** 做人体检测、**深度 ROI 中值** 估计距离，并通过 **Web 页面** 完成最多 **10 个面容档案** 的录入、删除、重复面容检测与身份识别。配置集中在 `config.py`，便于实验与论文中复现实验参数。
+本项目基于 **Intel RealSense D435** 彩色与深度流（亦可切换为树莓派 USB 摄像头推流），结合 **YOLOv8** 做人体检测、**深度 ROI 中值** 估计距离（树莓派 RGB 模式下无深度图），并通过 **Web 页面** 完成最多 **10 个面容档案** 的录入、删除、重复面容检测与身份识别。配置集中在 `config.py`，便于实验与论文中复现实验参数。
+
+---
+
+## 树莓派采集端与上位机分工（可选）
+
+| 组件 | 运行位置 | 说明 |
+|------|----------|------|
+| 摄像头（UVC 或 RealSense D435） | 树莓派 | `shumeipai.py` 默认 `FYP_CAMERA_MODE=auto` 优先 RealSense（与 `jianjie.py` 一致）；可用 `FYP_CAMERA_ENABLE=0` 关闭；MJPEG：**`/camera/rgb`**（彩色）、**`/camera/depth`**（深度伪彩，仅 depth+color 启动成功时；否则该端点为占位图） |
+| 毫米波雷达串口 | 树莓派 | 同上脚本解析相位并通过 `/api/radar` 提供 JSON |
+| 人脸识别、年龄段、PhysFormer、档案存储 | **上位机** `face_app.py` | 浏览器始终访问上位机端口（默认 `:5000`） |
+| 视频构图拉流 | 上位机 | 设置 **`RADAR_PI_BASE=http://10.162.133.43:5000`** 且 **`USE_PI_CAMERA=1`** 后启动 `face_app.py`（换路由器时请改 IP）；上位机从树莓派 MJPEG 解码并在本机跑算法，本地不再占用 Intel RealSense |
+
+**上位机一键示例（Windows PowerShell）：**
+
+```powershell
+$env:RADAR_PI_BASE="http://10.162.133.43:5000"; $env:USE_PI_CAMERA="1"; python face_app.py
+```
+
+**依赖**：树莓派需安装 `opencv-python`、`Flask` 等与现有 `shumeipai.py` 一致的依赖；若摄像头为 **Intel RealSense D435**，还需 **`pyrealsense2`**（与 `jianjie.py` 相同，不经 OpenCV 按索引打开 `/dev/video0`）。上位机可选安装 `markdown` 以便 `/readme` 页面渲染表格。
+
+**RealSense 与树莓派**：在 ARM 上执行 `pip install pyrealsense2` 经常出现 *No matching distribution*，这是正常现象（PyPI 未必提供当前 Python/架构的 wheel）。请按 Intel 官方文档从源码编译 **librealsense** 并生成 Python 绑定（例如文档中的 Raspberry Pi / ARM 安装流程：<https://github.com/IntelRealSense/librealsense/blob/master/doc/installation_raspbian.md>）。若日志出现 **`No device connected`**，说明 Python 库已能加载，但 **USB 侧未枚举到相机**：换 **USB3** 口、换数据线、保证供电，并在 Pi 上运行 `rs-enumerate-devices`（或 `lsusb`）确认设备出现。RealSense 失败回退到 V4L2 时，可用 `ls /dev/video*` 查看节点，并通过环境变量 **`FYP_CAMERA_DEVICE=/dev/videoN`** 指定实际彩色节点（有时不是 `video0`）。
 
 ---
 
@@ -330,7 +351,7 @@ python train_age_model.py --device cuda --fairface-root path/to/fairface --fairf
 
 | 环境变量 | 作用 |
 |----------|------|
-| `RADAR_PI_BASE` | 例如 `http://192.168.1.50:5000`，为空则不拉取雷达 JSON |
+| `RADAR_PI_BASE` | 例如 **`http://10.162.133.43:5000`**（与本仓库默认树莓派 IP 一致），为空则不拉取雷达 JSON |
 | `FUSION_DEPTH_SCENE_MIN_M` / `FUSION_DEPTH_SCENE_MAX_M` | 覆盖融合用的场景深度窗（米） |
 | `FUSION_USE_DEPTH_BIN_MATCH` | 设为 `0` 或 `false` 关闭深度–通道 id 匹配 |
 | `PHYSFORMER_ENABLED` | `0` 关闭 PhysFormer 心率 |
@@ -342,15 +363,21 @@ python train_age_model.py --device cuda --fairface-root path/to/fairface --fairf
 
 | 环境变量 | 默认 / 说明 |
 |----------|-------------|
-| `FYP_PC_HOST` | 上位机局域网 IP；未单独设置 `FYP_UI_URL` 时用于拼出浏览器打开的界面地址 |
-| `FYP_UI_URL` | 上位机 `face_app` 根地址（如 `http://10.x.x.x:5000`），Pi 首页提示与唤醒流程使用 |
-| `FYP_LAUNCHER_URL` | 上位机 `fyp_launcher` 地址（默认拼为 `http://<PC>:8787`），供 Pi **POST /launch** 等联动 |
+| `FYP_PC_HOST` | 上位机局域网 IP；未单独设置 `FYP_UI_URL` / `FYP_LAUNCHER_URL` 时用于拼出界面与 launcher 地址 |
+| `FYP_UI_URL` | 上位机 `face_app` 根地址（可与 `FYP_PC_HOST` 联动生成） |
+| `FYP_LAUNCHER_URL` | 上位机 `fyp_launcher` 地址（可与 `FYP_PC_HOST` 联动生成），供 Pi **POST /launch** |
+| `FYP_CAMERA_ENABLE` | 默认 `1`（摄像头插在树莓派时）；设为 `0` 仅雷达、不采集摄像头 |
+| `FYP_CAMERA_MODE` | 默认 **`auto`**：优先 **RealSense**（`pyrealsense2`，与 `jianjie.py` 一致），失败再试 UVC；`realsense` / `uvc` 可强制单一路径 |
+| `FYP_CAMERA_INDEX` / `FYP_CAMERA_WIDTH` / `FYP_CAMERA_HEIGHT` / `FYP_CAMERA_FPS` | UVC 时的设备索引与分辨率、帧率（RealSense 启动时也使用相同宽高与帧率） |
+| `FYP_CAMERA_DEVICE` | 例如 **`/dev/video2`**：直接打开该 V4L2 节点（RealSense 在部分系统上会生成多个 video 节点） |
+| `FYP_CAMERA_PROBE` | 默认 `1`：依次尝试打开能出画的 `/dev/video*`；设为 `0` 则只用 `FYP_CAMERA_INDEX` |
+| `FYP_REALSENSE_COLOR_ONLY` | 默认 `0`；设为 `1` 时跳过深度流（减轻带宽，便于 USB2 或调试） |
 | `FYP_LAUNCHER_TOKEN` | 与 launcher 校验头 `X-FYP-Token` 一致时，远程唤醒更安全 |
 | `FYP_SERIAL` | 毫米波串口设备路径，默认 `/dev/ttyUSB0` |
 | `FYP_BIND` | HTTP 监听地址，默认 `0.0.0.0` |
 | `FYP_PORT` | HTTP 端口，默认 `5000`（与上位机 `RADAR_PI_BASE` 端口一致） |
-| `FYP_OPEN_KIOSK` | 设为非 `1` 时可关闭启动时尝试打开 Chromium 全屏等行为（依脚本实现） |
-| `FYP_AUTO_START` | 设为 `0` 可关闭进程内自动启动序列（依脚本实现） |
+| `FYP_OPEN_KIOSK` | 设为非 `1` 时可关闭启动时尝试打开 Chromium 全屏等行为 |
+| `FYP_AUTO_START` | 默认 `1`：启动序列（POST launcher、可选 kiosk）；设为 `0` 可关闭 |
 
 ### 上位机一键入口（`fyp_launcher.py`）环境变量
 

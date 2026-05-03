@@ -4,8 +4,15 @@ WIDTH = 640
 HEIGHT = 480
 FPS = 30
 
-# 树莓派上 shumeipai.py 的 HTTP 根地址，例如 http://10.162.133.43:5000
-RADAR_PI_BASE = os.environ.get("RADAR_PI_BASE", "").rstrip("/")
+# 树莓派 shumeipai.py 的 HTTP 根（雷达 JSON + USB 摄像头 MJPEG）。默认固定为你的局域网树莓派；可用环境变量覆盖。
+_DEFAULT_RADAR_PI_BASE = "http://10.162.133.43:5000"
+RADAR_PI_BASE = (os.environ.get("RADAR_PI_BASE") or _DEFAULT_RADAR_PI_BASE).strip().rstrip(
+    "/"
+)
+
+# 默认 True：视频从树莓派拉流，本机不占用 Intel RealSense。若临时改用本机 D435，请设 USE_PI_CAMERA=0。
+_USE_PI_RAW = (os.environ.get("USE_PI_CAMERA") or "1").strip().lower()
+USE_PI_CAMERA = _USE_PI_RAW not in ("0", "false", "no")
 
 WINDOW_NAME = "D435 Person Detection"
 DEPTH_WINDOW_NAME = "D435 Depth"

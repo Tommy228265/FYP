@@ -1,6 +1,9 @@
 import copy
+import html
 import json
 import math
+import os
+import sys
 import threading
 import time
 import urllib.error
@@ -16,6 +19,7 @@ from flask import Flask, Response, jsonify, render_template, request
 
 from config import (
     RADAR_PI_BASE,
+    USE_PI_CAMERA,
     WIDTH,
     HEIGHT,
     FPS,
@@ -115,9 +119,15 @@ pipeline = None
 align = None
 depth_scale = 1.0
 
+camera_backend = "realsense"
+_remote_cap = None
+_remote_depth_cap = None
+_pi_depth_feed_ok = False
+
 _embedder = None
 _age_estimator = None
 _physformer: Optional[PhysFormerEngine] = None
+_model_init_lock = threading.Lock()
 
 
 def get_resp_tracker() -> VisualRespirationTracker:
@@ -175,21 +185,25 @@ def _pack_vitals(
 def get_embedder() -> FaceEmbedder:
     global _embedder
     if _embedder is None:
-        _embedder = FaceEmbedder(
-            min_face_size=FACE_MTCNN_MIN_FACE_SIZE,
-            pretrained=FACE_PRETRAINED,
-        )
+        with _model_init_lock:
+            if _embedder is None:
+                _embedder = FaceEmbedder(
+                    min_face_size=FACE_MTCNN_MIN_FACE_SIZE,
+                    pretrained=FACE_PRETRAINED,
+                )
     return _embedder
 
 
 def get_age_estimator() -> AgeEstimator:
     global _age_estimator
     if _age_estimator is None:
-        _age_estimator = AgeEstimator(
-            model_path=AGE_MODEL_FILE,
-            classes=AGE_CLASSES,
-            input_size=AGE_INPUT_SIZE,
-        )
+        with _model_init_lock:
+            if _age_estimator is None:
+                _age_estimator = AgeEstimator(
+                    model_path=AGE_MODEL_FILE,
+                    classes=AGE_CLASSES,
+                    input_size=AGE_INPUT_SIZE,
+                )
     return _age_estimator
 
 
@@ -522,16 +536,83 @@ def draw_status_panel(frame: np.ndarray, local_mode: str, text: str, ready_count
     cv2.putText(frame, text[:48], (210, 43), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
 
 
+def _resolve_cjk_font_path() -> Optional[str]:
+    env = (os.environ.get("FYP_OPENCV_FONT") or "").strip()
+    if env and os.path.isfile(env):
+        return env
+    for p in (
+        r"C:\Windows\Fonts\msyh.ttc",
+        r"C:\Windows\Fonts\msyhbd.ttc",
+        r"C:\Windows\Fonts\simhei.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    ):
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+_pil_label_font = None  # cache: ImageFont or False
+
+
+def _get_pil_label_font():
+    global _pil_label_font
+    if _pil_label_font is False:
+        return None
+    if _pil_label_font is not None:
+        return _pil_label_font
+    try:
+        from PIL import ImageFont
+    except ImportError:
+        _pil_label_font = False
+        return None
+    path = _resolve_cjk_font_path()
+    if not path:
+        _pil_label_font = False
+        return None
+    try:
+        _pil_label_font = ImageFont.truetype(path, 18)
+        return _pil_label_font
+    except Exception:
+        _pil_label_font = False
+        return None
+
+
 def draw_label(frame: np.ndarray, text: str, x: int, y: int, color: Tuple[int, int, int]):
+    """绘制人脸旁标签；中文/日文等非 ASCII 需系统字体或设置 FYP_OPENCV_FONT。"""
+    pil_font = _get_pil_label_font()
+    if pil_font is not None:
+        try:
+            from PIL import ImageDraw
+            from PIL import Image as PILImage
+
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pil_im = PILImage.fromarray(rgb)
+            draw = ImageDraw.Draw(pil_im)
+            bbox = draw.textbbox((0, 0), text, font=pil_font)
+            tw = bbox[2] - bbox[0]
+            th = bbox[3] - bbox[1]
+            top = max(y - th - 14, 2)
+            left = max(x, 2)
+            right = min(left + tw + 14, WIDTH - 2)
+            fill_rgb = (int(color[2]), int(color[1]), int(color[0]))
+            draw.rectangle([left, top, right, top + th + 12], fill=fill_rgb)
+            draw.text((left + 7, top + 4), text, font=pil_font, fill=(255, 255, 255))
+            frame[:, :, :] = cv2.cvtColor(np.asarray(pil_im), cv2.COLOR_RGB2BGR)
+            return
+        except Exception:
+            pass
+
     font = cv2.FONT_HERSHEY_SIMPLEX
     scale = 0.58
     thickness = 2
-    (tw, th), _ = cv2.getTextSize(text, font, scale, thickness)
+    safe = "".join(c if ord(c) < 128 else "?" for c in text)
+    (tw, th), _ = cv2.getTextSize(safe, font, scale, thickness)
     top = max(y - th - 14, 2)
     left = max(x, 2)
     right = min(left + tw + 14, WIDTH - 2)
     cv2.rectangle(frame, (left, top), (right, top + th + 12), color, -1)
-    cv2.putText(frame, text, (left + 7, top + th + 6), font, scale, (255, 255, 255), thickness)
+    cv2.putText(frame, safe, (left + 7, top + th + 6), font, scale, (255, 255, 255), thickness)
 
 
 def draw_recognition_banner(frame: np.ndarray, labels: List[str], scores: List[float], ages: List[dict]):
@@ -558,8 +639,237 @@ def draw_recognition_banner(frame: np.ndarray, labels: List[str], scores: List[f
     cv2.putText(frame, detail_text, (26, top + 67), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (245, 245, 245), 2)
 
 
+def _make_pi_missing_frame_bgr() -> np.ndarray:
+    """上位机拉不到有效帧时给出可读提示（便于区分「黑屏」与「算法未跑」）。"""
+    img = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
+    img[:] = (36, 36, 42)
+    lines = [
+        "No video from Raspberry Pi",
+        "Open http://<Pi>:5000/camera/rgb in browser",
+        "Fix USB camera on Pi (see Pi terminal: ls /dev/video*)",
+        "Or set USE_PI_CAMERA=0 and use Intel RealSense on PC",
+    ]
+    y = 36
+    for line in lines:
+        cv2.putText(
+            img,
+            line[:78],
+            (16, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.42 if WIDTH >= 640 else 0.35,
+            (210, 210, 220),
+            1,
+            cv2.LINE_AA,
+        )
+        y += int(26 * (HEIGHT / 480.0))
+    return img
+
+
+def _make_pi_depth_placeholder_bgr() -> np.ndarray:
+    """上位机拉不到树莓派深度 MJPEG 时的占位（仍与 RGB 并排展示）。"""
+    img = np.full((HEIGHT, WIDTH, 3), 32, dtype=np.uint8)
+    cv2.putText(
+        img,
+        "No Pi depth MJPEG — open <Pi>:5000/camera/depth",
+        (14, 36),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.48,
+        (200, 200, 210),
+        1,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        img,
+        "Needs RealSense depth+color on Pi; USB cam has no depth",
+        (14, 64),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.42,
+        (140, 140, 155),
+        1,
+        cv2.LINE_AA,
+    )
+    return img
+
+
+def _pi_depth_frame_to_bgr_display(dfr: np.ndarray) -> np.ndarray:
+    """
+    解码树莓派深度 MJPEG：可能是单通道灰度；须转为 BGR 再画彩色人脸框。
+    伪彩极暗时用 CLAHE 提亮整幅（仅用于显示）。
+    """
+    if dfr.ndim == 2:
+        out = cv2.cvtColor(dfr, cv2.COLOR_GRAY2BGR)
+    elif dfr.shape[2] == 4:
+        out = cv2.cvtColor(dfr, cv2.COLOR_BGRA2BGR)
+    else:
+        out = dfr
+    if float(np.mean(out)) < 22:
+        lab = cv2.cvtColor(out, cv2.COLOR_BGR2LAB)
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+        lab[:, :, 0] = clahe.apply(lab[:, :, 0])
+        out = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+    return out
+
+
+def _ensure_pi_depth_capture():
+    """树莓派 /camera/depth MJPEG（深度伪彩）；与 RGB 同源对齐时可画人脸框。"""
+    global _remote_depth_cap
+    base = (RADAR_PI_BASE or "").strip().rstrip("/")
+    if not base:
+        return None
+    url = base + "/camera/depth"
+    if _remote_depth_cap is not None and _remote_depth_cap.isOpened():
+        return _remote_depth_cap
+    if _remote_depth_cap is not None:
+        try:
+            _remote_depth_cap.release()
+        except Exception:
+            pass
+        _remote_depth_cap = None
+
+    caps_to_try: List[int] = []
+    ffmpeg_cap = getattr(cv2, "CAP_FFMPEG", None)
+    if ffmpeg_cap is not None:
+        caps_to_try.append(int(ffmpeg_cap))
+    any_cap = getattr(cv2, "CAP_ANY", None)
+    if any_cap is not None:
+        caps_to_try.append(int(any_cap))
+    caps_to_try.append(0)
+    _seen: set = set()
+    _uniq: List[int] = []
+    for x in caps_to_try:
+        if x not in _seen:
+            _seen.add(x)
+            _uniq.append(x)
+    caps_to_try = _uniq
+
+    last_err = None
+    cap = None
+    for api in caps_to_try:
+        try:
+            c = cv2.VideoCapture(url, api)
+            if c.isOpened():
+                try:
+                    c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                except Exception:
+                    pass
+                cap = c
+                print("[INFO] 树莓派深度 MJPEG 已打开 (%s) backend=%s" % (url, api))
+                break
+            try:
+                c.release()
+            except Exception:
+                pass
+        except Exception as e:
+            last_err = e
+    if cap is None:
+        cap = cv2.VideoCapture(url)
+    if cap is not None and cap.isOpened():
+        for _ in range(8):
+            cap.read()
+    _remote_depth_cap = cap
+    if not cap.isOpened():
+        print(
+            "[WARN] 无法打开树莓派深度流: %s （%s）"
+            % (url, last_err if last_err else "仍将显示占位深度面板")
+        )
+    return _remote_depth_cap
+
+
+def _ensure_pi_video_capture():
+    """延迟打开树莓派 MJPEG；Windows 下 HTTP 流优先 FFmpeg 后端。"""
+    global _remote_cap
+    base = (RADAR_PI_BASE or "").strip().rstrip("/")
+    if not base:
+        return None
+    url = base + "/camera/rgb"
+    if _remote_cap is not None and _remote_cap.isOpened():
+        return _remote_cap
+    if _remote_cap is not None:
+        try:
+            _remote_cap.release()
+        except Exception:
+            pass
+        _remote_cap = None
+
+    caps_to_try: List[int] = []
+    ffmpeg_cap = getattr(cv2, "CAP_FFMPEG", None)
+    if ffmpeg_cap is not None:
+        caps_to_try.append(int(ffmpeg_cap))
+    any_cap = getattr(cv2, "CAP_ANY", None)
+    if any_cap is not None:
+        caps_to_try.append(int(any_cap))
+    caps_to_try.append(0)
+    _uniq: List[int] = []
+    _seen: set = set()
+    for x in caps_to_try:
+        if x not in _seen:
+            _seen.add(x)
+            _uniq.append(x)
+    caps_to_try = _uniq
+
+    last_err = None
+    cap = None
+    for api in caps_to_try:
+        try:
+            c = cv2.VideoCapture(url, api)
+            if c.isOpened():
+                try:
+                    c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                except Exception:
+                    pass
+                cap = c
+                print("[INFO] 树莓派 MJPEG 已打开 (%s) backend=%s" % (url, api))
+                break
+            try:
+                c.release()
+            except Exception:
+                pass
+        except Exception as e:
+            last_err = e
+    if cap is None:
+        cap = cv2.VideoCapture(url)
+    _remote_cap = cap
+    if not cap.isOpened():
+        print(
+            "[ERROR] 无法打开树莓派 MJPEG: %s （%s）"
+            % (url, last_err if last_err else "仍可用浏览器访问该 URL 排查")
+        )
+    return _remote_cap
+
+
 def start_camera():
-    global pipeline, align, depth_scale
+    global pipeline, align, depth_scale, camera_backend, _remote_cap, _remote_depth_cap
+    if USE_PI_CAMERA:
+        base = (RADAR_PI_BASE or "").strip().rstrip("/")
+        if not base:
+            raise SystemExit(
+                "USE_PI_CAMERA=1 需要设置环境变量 RADAR_PI_BASE（树莓派服务地址，如 http://10.162.133.43:5000）"
+            )
+        camera_backend = "pi_http"
+        if _remote_cap is not None:
+            try:
+                _remote_cap.release()
+            except Exception:
+                pass
+            _remote_cap = None
+        if _remote_depth_cap is not None:
+            try:
+                _remote_depth_cap.release()
+            except Exception:
+                pass
+            _remote_depth_cap = None
+        pipeline = None
+        align = None
+        print(
+            "[INFO] 树莓派视频将在首帧时连接（避免阻塞启动）；%s/camera/rgb 与 %s/camera/depth"
+            % (base.rstrip("/"), base.rstrip("/"))
+        )
+        return
+
+    camera_backend = "realsense"
+    if _remote_cap is not None:
+        _remote_cap.release()
+        _remote_cap = None
     pipeline = rs.pipeline()
     rs_config = rs.config()
     rs_config.enable_stream(rs.stream.color, WIDTH, HEIGHT, rs.format.bgr8, FPS)
@@ -570,7 +880,20 @@ def start_camera():
 
 
 def stop_camera():
-    global pipeline
+    global pipeline, camera_backend, _remote_cap, _remote_depth_cap
+    if camera_backend == "pi_http":
+        if _remote_cap is not None:
+            _remote_cap.release()
+            _remote_cap = None
+        if _remote_depth_cap is not None:
+            try:
+                _remote_depth_cap.release()
+            except Exception:
+                pass
+            _remote_depth_cap = None
+        camera_backend = "realsense"
+        pipeline = None
+        return
     if pipeline is not None:
         pipeline.stop()
         pipeline = None
@@ -578,23 +901,52 @@ def stop_camera():
 
 def frame_generator():
     global last_enroll_time, status_text, mode, enroll_person, last_recognition, last_vitals, last_vitals_fusion, last_depth_jpeg
-    global last_live_preview, pending_enroll_display_name
+    global last_live_preview, pending_enroll_display_name, _pi_depth_feed_ok
     embedder = get_embedder()
     age_estimator = get_age_estimator()
+    pi_read_fail = 0
     while True:
-        if pipeline is None:
-            time.sleep(0.05)
-            continue
+        if camera_backend == "pi_http":
+            cap = _ensure_pi_video_capture()
+            if cap is None or not cap.isOpened():
+                time.sleep(0.08)
+                frame = _make_pi_missing_frame_bgr()
+                pi_read_fail = 0
+            else:
+                ok, frame = cap.read()
+                if (
+                    not ok
+                    or frame is None
+                    or (isinstance(frame, np.ndarray) and frame.size == 0)
+                ):
+                    pi_read_fail += 1
+                    if pi_read_fail >= 45:
+                        frame = _make_pi_missing_frame_bgr()
+                        pi_read_fail = 0
+                    else:
+                        time.sleep(0.02)
+                        continue
+                else:
+                    pi_read_fail = 0
+                    if frame.shape[1] != WIDTH or frame.shape[0] != HEIGHT:
+                        frame = cv2.resize(frame, (WIDTH, HEIGHT))
+            depth_image = np.zeros((HEIGHT, WIDTH), dtype=np.uint16)
+            depth_scale_local = 0.001
+        else:
+            if pipeline is None:
+                time.sleep(0.05)
+                continue
 
-        frames = pipeline.wait_for_frames()
-        frames = align.process(frames)
-        color_frame = frames.get_color_frame()
-        depth_frame = frames.get_depth_frame()
-        if not color_frame or not depth_frame:
-            continue
+            frames = pipeline.wait_for_frames()
+            frames = align.process(frames)
+            color_frame = frames.get_color_frame()
+            depth_frame = frames.get_depth_frame()
+            if not color_frame or not depth_frame:
+                continue
 
-        frame = np.asanyarray(color_frame.get_data())
-        depth_image = np.asanyarray(depth_frame.get_data())
+            frame = np.asanyarray(color_frame.get_data())
+            depth_image = np.asanyarray(depth_frame.get_data())
+            depth_scale_local = depth_scale
 
         with state_lock:
             local_mode = mode
@@ -615,7 +967,7 @@ def frame_generator():
                 x2, y2 = x + bw, y + bh
                 dist_m = median_depth_meters(
                     depth_image,
-                    depth_scale,
+                    depth_scale_local,
                     x,
                     y,
                     bw,
@@ -648,7 +1000,7 @@ def frame_generator():
                     vitals_list[face_index]["depth_valid_ratio"] = round(
                         face_depth_valid_ratio(
                             depth_image,
-                            depth_scale,
+                            depth_scale_local,
                             x,
                             y,
                             bw,
@@ -713,7 +1065,7 @@ def frame_generator():
 
             dist_m = median_depth_meters(
                 depth_image,
-                depth_scale,
+                depth_scale_local,
                 x,
                 y,
                 bw,
@@ -906,19 +1258,50 @@ def frame_generator():
                     last_recognition["ages"],
                 )
 
-        depth_vis = cv2.applyColorMap(
-            cv2.convertScaleAbs(depth_image, alpha=DEPTH_VIS_ALPHA),
-            cv2.COLORMAP_TURBO,
-        )
-        for _emb, _pr, _bl, bbox in face_items:
-            fx, fy, fw, fh = bbox
-            cv2.rectangle(
-                depth_vis,
-                (int(fx), int(fy)),
-                (int(fx + fw), int(fy + fh)),
-                (0, 255, 100),
-                2,
+        if camera_backend == "pi_http":
+            got_pi_depth = False
+            d_cap = _ensure_pi_depth_capture()
+            if d_cap is not None and d_cap.isOpened():
+                okd, dfr = d_cap.read()
+                if (
+                    okd
+                    and dfr is not None
+                    and isinstance(dfr, np.ndarray)
+                    and dfr.size > 0
+                ):
+                    got_pi_depth = True
+                    dfr = _pi_depth_frame_to_bgr_display(dfr)
+                    if dfr.shape[1] != WIDTH or dfr.shape[0] != HEIGHT:
+                        dfr = cv2.resize(dfr, (WIDTH, HEIGHT))
+                    depth_vis = dfr.copy()
+                else:
+                    depth_vis = _make_pi_depth_placeholder_bgr()
+            else:
+                depth_vis = _make_pi_depth_placeholder_bgr()
+            _pi_depth_feed_ok = got_pi_depth
+            for _emb, _pr, _bl, bbox in face_items:
+                fx, fy, fw, fh = bbox
+                cv2.rectangle(
+                    depth_vis,
+                    (int(fx), int(fy)),
+                    (int(fx + fw), int(fy + fh)),
+                    (0, 255, 100),
+                    2,
+                )
+        else:
+            depth_vis = cv2.applyColorMap(
+                cv2.convertScaleAbs(depth_image, alpha=DEPTH_VIS_ALPHA),
+                cv2.COLORMAP_TURBO,
             )
+            for _emb, _pr, _bl, bbox in face_items:
+                fx, fy, fw, fh = bbox
+                cv2.rectangle(
+                    depth_vis,
+                    (int(fx), int(fy)),
+                    (int(fx + fw), int(fy + fh)),
+                    (0, 255, 100),
+                    2,
+                )
         ok_depth, jpg_depth = cv2.imencode(".jpg", depth_vis)
         if ok_depth:
             with state_lock:
@@ -937,6 +1320,29 @@ def frame_generator():
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+def _readme_html() -> str:
+    md_path = Path(__file__).resolve().parent / "README.md"
+    raw = md_path.read_text(encoding="utf-8") if md_path.is_file() else "# 未找到 README.md"
+    try:
+        import markdown
+
+        return markdown.markdown(
+            raw,
+            extensions=["tables", "fenced_code", "nl2br"],
+        )
+    except ImportError:
+        return '<pre class="readme-fallback">%s</pre>' % html.escape(raw)
+
+
+@app.route("/readme")
+def readme_page():
+    return render_template(
+        "docs.html",
+        title="项目说明与引用",
+        body_html=_readme_html(),
+    )
 
 
 @app.route("/video_feed")
@@ -986,6 +1392,8 @@ def api_status():
             {
                 "mode": mode,
                 "status_text": status_text,
+                "enroll_person": enroll_person,
+                "enrolling_display_name": pending_enroll_display_name if mode == "enroll" else None,
                 "max_profiles": FACE_MAX_PROFILES,
                 "ready_count": sum(1 for profile in profiles.values() if profile is not None),
                 "target_samples": ENROLL_SAMPLES_TARGET,
@@ -1005,6 +1413,14 @@ def api_status():
                         FUSION_DEPTH_SCENE_MAX_M,
                     ],
                     "fusion_use_depth_bin_match": FUSION_USE_DEPTH_BIN_MATCH,
+                },
+                "sensor": {
+                    "camera_backend": camera_backend,
+                    "depth_available": True,
+                    "use_pi_camera": USE_PI_CAMERA,
+                    "pi_depth_live": (
+                        _pi_depth_feed_ok if camera_backend == "pi_http" else None
+                    ),
                 },
             }
         )
@@ -1188,12 +1604,26 @@ def api_profile_display_name():
 if __name__ == "__main__":
     load_profile_meta()
     load_profiles()
+    if USE_PI_CAMERA:
+        print(
+            "[INFO] USE_PI_CAMERA=1：拉取树莓派 /camera/rgb 与 /camera/depth；"
+            "深度量测融合仍以雷达通道配对为主（Pi 侧无原始深度矩阵上传）。"
+        )
+    else:
+        print("[INFO] 使用本机 Intel RealSense（RGB + 深度）。")
     start_camera()
     threading.Thread(target=radar_background_poll_loop, daemon=True).start()
-    print("Facenet 人脸模型首次运行会下载权重，请稍候。")
-    get_embedder()
-    print(f"Age model: {get_age_estimator().status}")
-    print("Web: http://127.0.0.1:5000  按 Ctrl+C 退出")
+
+    def _preload_models():
+        print("[INFO] Facenet 首次运行可能下载权重，请稍候…")
+        get_embedder()
+        print("[INFO] Age model: %s" % (get_age_estimator().status,))
+        print("[OK] 人脸与年龄段模型已就绪")
+
+    threading.Thread(target=_preload_models, daemon=True).start()
+    print(
+        "Web: http://127.0.0.1:5000  （/api/status 立即可用；识别模型后台加载中）按 Ctrl+C 退出"
+    )
     try:
         app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
     finally:

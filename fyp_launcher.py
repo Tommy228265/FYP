@@ -8,8 +8,9 @@
   python fyp_launcher.py
 
 环境变量（可选）:
-  RADAR_PI_BASE             树莓派雷达 API，未设置时使用下方默认值
-  FYP_DEFAULT_RADAR_PI_BASE 覆盖内置默认雷达地址（默认 http://10.162.133.43:5000）
+  RADAR_PI_BASE             树莓派 HTTP 根地址（雷达 + 可选摄像头流）
+  USE_PI_CAMERA=1           视频从树莓派 /camera/rgb 拉流，本机不占用 RealSense
+  FYP_DEFAULT_RADAR_PI_BASE 覆盖内置默认树莓派地址（默认 http://10.162.133.43:5000）
   FYP_LAUNCHER_PORT         默认 8787
   FYP_LAUNCHER_TOKEN        树莓派请求 /launch 时的 X-FYP-Token
   FYP_FACEAPP_CHECK         检测 face_app 是否就绪的 URL
@@ -121,9 +122,18 @@ def _terminate_spawned_face_app():
 
 def _wait_face_app(timeout_sec=120, step_sec=1.0):
     deadline = time.time() + timeout_sec
+    last_report = 0.0
     while time.time() < deadline:
         if _face_app_running():
             return True
+        now = time.time()
+        if now - last_report >= 12.0:
+            waited = int(now - (deadline - timeout_sec))
+            print(
+                "[INFO] 仍在等待 face_app 监听 %s …（已等待约 %ss，首次启动会在后台加载深度学习模型）"
+                % (FACE_APP_URL, waited)
+            )
+            last_report = now
         time.sleep(step_sec)
     return False
 
