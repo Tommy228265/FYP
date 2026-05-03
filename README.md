@@ -300,6 +300,74 @@ python train_age_model.py --device cuda --fairface-root path/to/fairface --fairf
 
 ---
 
+## 推送到 GitHub
+
+### 1. 本机需已安装 Git
+
+- Windows：安装 [Git for Windows](https://git-scm.com/download/win)，安装时勾选 **“Add Git to PATH”**。  
+- 在 **PowerShell** 或 **Git Bash** 中执行下文命令（本仓库已含 `.git`，无需 `git init`）。
+
+若 `git` 仍无法识别，可重启终端，或使用 **GitHub Desktop**（图形界面完成 clone / commit / push）。
+
+### 2. 在 GitHub 上新建空仓库
+
+1. 打开 [https://github.com/new](https://github.com/new)  
+2. 填写 **Repository name**（例如 `FYP`）  
+3. 可见性选 **Private**（含人脸/实验相关代码时建议私有）或 **Public**  
+4. **不要**勾选 “Add a README / .gitignore / license”（本地已有文件），点击 **Create repository**。
+
+### 3. 首次绑定远程并推送（HTTPS）
+
+将下面命令里的 `你的用户名` 和 `仓库名` 换成你自己的（HTTPS 地址以 GitHub 新建页为准）：
+
+```powershell
+cd C:\Users\gsnlk\Desktop\FYP
+
+git status
+git add .
+git commit -m "Initial commit: FYP RealSense + radar fusion project"
+
+git remote add origin https://github.com/你的用户名/仓库名.git
+git branch -M main
+git push -u origin main
+```
+
+推送时若提示登录：
+
+- **HTTPS**：用户名填 GitHub 用户名，密码处填 **Personal Access Token**（[Settings → Developer settings → Tokens](https://github.com/settings/tokens) 新建，勾选 `repo`）。  
+- 或使用 **SSH**：先在 GitHub 添加 SSH 公钥，再把 `origin` 改为 `git@github.com:你的用户名/仓库名.git`。
+
+### 4. 已加强的忽略规则（勿把隐私与大文件传上去）
+
+`.gitignore` 已包含：`datasets/`、大权重 `*.pkl`、**人脸档案** `face_profiles*.npz`、**年龄模型** `age_model_effnet_b0.pth`、**YOLO 权重** `yolov8n.pt`、`.env`、以及 **`*.jpg` / `*.jpeg`**（减小克隆体积）等。  
+若你曾把上述文件 **已经 commit 过**，需先从索引或历史中移除再推送。
+
+### 5. 不再跟踪已上传的 JPG/JPEG（减轻今后 clone 体积）
+
+仓库根目录已忽略 `*.jpg`、`*.jpeg`。若这些文件 **曾经被提交到 Git**，仅改 `.gitignore` 不会自动去掉远端里的旧版本，需要 **先从索引取消跟踪**（本地文件保留）：
+
+```powershell
+cd C:\Users\gsnlk\Desktop\FYP
+powershell -ExecutionPolicy Bypass -File .\scripts\untrack_jpg_from_git.ps1
+git add .gitignore
+git commit -m "chore: stop tracking jpg/jpeg images"
+git push
+```
+
+**说明**：上述步骤只会让 **之后的新克隆** 不再包含这些图片文件（它们会从仓库最新快照中删除）；别人仍可能在 **历史旧 commit** 里看到大文件。若必须把整个历史中 JPG 也抹掉以减小体积，需在备份仓库后使用 [`git filter-repo`](https://github.com/newren/git-filter-repo) 等重写历史（小组协作仓库慎用）。
+
+### 6. 可选：GitHub CLI
+
+若已安装 [`gh`](https://cli.github.com/)：
+
+```powershell
+cd C:\Users\gsnlk\Desktop\FYP
+gh auth login
+gh repo create FYP --private --source=. --remote=origin --push
+```
+
+---
+
 ## 许可与引用
 
 - **Ultralytics YOLO**、**facenet-pytorch**、**Intel RealSense** 各自遵循其开源协议；撰写论文时请按课程要求引用对应库与论文。

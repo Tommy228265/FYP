@@ -8,7 +8,39 @@
 **/Physformer_UBFC_*.pkl
 *.mat
 
+# Local identity & model files (do not push to public GitHub)
+face_profiles*.npz
+age_model_effnet_b0.pth
+yolov8n.pt
+*.onnx
+
+# Secrets
+.env
+.env.*
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Training / run logs
+*_log.txt
+*.log
+
 # Python
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+.DS_Store
+
+# Images (keep clones small; do not commit camera captures / exports)
+*.jpg
+*.jpeg
+*.JPG
+*.JPEG
