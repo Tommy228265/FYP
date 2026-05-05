@@ -4,8 +4,26 @@ WIDTH = 640
 HEIGHT = 480
 FPS = 30
 
+# ---------- Web 视频流：减轻卡顿、简化画面 ----------
+# 仅绘制绿色人脸框，不绘制顶部状态栏、底部识别横幅、人名/深度等叠字（相机自带 OSD 需在硬件菜单关闭）
+# 恢复完整 HUD：VIDEO_MINIMAL_OVERLAY=0
+VIDEO_MINIMAL_OVERLAY = os.environ.get("VIDEO_MINIMAL_OVERLAY", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+)
+# MJPEG JPEG 质量（越低编码越快、带宽越小；Wi‑Fi 可试 70–80）
+VIDEO_JPEG_QUALITY = max(40, min(95, int(os.environ.get("VIDEO_JPEG_QUALITY", "78"))))
+VIDEO_JPEG_DEPTH_QUALITY = max(40, min(95, int(os.environ.get("VIDEO_JPEG_DEPTH_QUALITY", "72"))))
+# 设为 0 则不再每帧编码深度 MJPEG（不看 /video_depth 时可减负）
+VIDEO_ENCODE_DEPTH_STREAM = os.environ.get("VIDEO_ENCODE_DEPTH_STREAM", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+)
+
 # 树莓派 shumeipai.py 的 HTTP 根（雷达 JSON + USB 摄像头 MJPEG）。默认固定为你的局域网树莓派；可用环境变量覆盖。
-_DEFAULT_RADAR_PI_BASE = "http://10.162.133.43:5000"
+_DEFAULT_RADAR_PI_BASE = "http://10.245.232.43:5000"
 RADAR_PI_BASE = (os.environ.get("RADAR_PI_BASE") or _DEFAULT_RADAR_PI_BASE).strip().rstrip(
     "/"
 )
@@ -52,6 +70,25 @@ FUSION_USE_DEPTH_BIN_MATCH = os.environ.get(
 
 # 深度可视化缩放（仅用于显示）
 DEPTH_VIS_ALPHA = 0.03
+
+# 人脸质量：有有效 ROI 深度（米）时，要求落在生命体征推荐带内才视为高质（录入/识别）；无深度读数时不加此限制
+FACE_DEPTH_QUALITY_GATE = os.environ.get("FACE_DEPTH_QUALITY_GATE", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+)
+
+# 识别稳定锁定：滑动窗口内同一组人名占比超过阈值则冻结 API/雷达图例（仅保留绿框与视频）
+RECOGNITION_LOCK_WINDOW_SEC = float(os.environ.get("RECOGNITION_LOCK_WINDOW_SEC", "5"))
+RECOGNITION_LOCK_MAJORITY = float(os.environ.get("RECOGNITION_LOCK_MAJORITY", "0.51"))
+RECOGNITION_LOCK_MIN_VOTES = max(3, int(os.environ.get("RECOGNITION_LOCK_MIN_VOTES", "10")))
+
+# 年龄：参考年龄存在且某次预测判定正确后，该 track 的展示年龄冻结到该值，直至停止识别/重新开识别等
+AGE_LOCK_ON_CORRECT = os.environ.get("AGE_LOCK_ON_CORRECT", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+)
 
 # ---------- Web 人脸：facenet-pytorch ----------
 FACE_PROFILE_FILE = "face_profiles_v2.npz"

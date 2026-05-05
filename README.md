@@ -11,12 +11,12 @@
 | 摄像头（UVC 或 RealSense D435） | 树莓派 | `shumeipai.py` 默认 `FYP_CAMERA_MODE=auto` 优先 RealSense（与 `jianjie.py` 一致）；可用 `FYP_CAMERA_ENABLE=0` 关闭；MJPEG：**`/camera/rgb`**（彩色）、**`/camera/depth`**（深度伪彩，仅 depth+color 启动成功时；否则该端点为占位图） |
 | 毫米波雷达串口 | 树莓派 | 同上脚本解析相位并通过 `/api/radar` 提供 JSON |
 | 人脸识别、年龄段、PhysFormer、档案存储 | **上位机** `face_app.py` | 浏览器始终访问上位机端口（默认 `:5000`） |
-| 视频构图拉流 | 上位机 | 设置 **`RADAR_PI_BASE=http://10.162.133.43:5000`** 且 **`USE_PI_CAMERA=1`** 后启动 `face_app.py`（换路由器时请改 IP）；上位机从树莓派 MJPEG 解码并在本机跑算法，本地不再占用 Intel RealSense |
+| 视频构图拉流 | 上位机 | 设置 **`RADAR_PI_BASE=http://10.245.232.43:5000`** 且 **`USE_PI_CAMERA=1`** 后启动 `face_app.py`（换路由器时请改 IP）；上位机从树莓派 MJPEG 解码并在本机跑算法，本地不再占用 Intel RealSense |
 
 **上位机一键示例（Windows PowerShell）：**
 
 ```powershell
-$env:RADAR_PI_BASE="http://10.162.133.43:5000"; $env:USE_PI_CAMERA="1"; python face_app.py
+$env:RADAR_PI_BASE="http://10.245.232.43:5000"; $env:USE_PI_CAMERA="1"; python face_app.py
 ```
 
 **依赖**：树莓派需安装 `opencv-python`、`Flask` 等与现有 `shumeipai.py` 一致的依赖；若摄像头为 **Intel RealSense D435**，还需 **`pyrealsense2`**（与 `jianjie.py` 相同，不经 OpenCV 按索引打开 `/dev/video0`）。上位机可选安装 `markdown` 以便 `/readme` 页面渲染表格。
@@ -351,7 +351,7 @@ python train_age_model.py --device cuda --fairface-root path/to/fairface --fairf
 
 | 环境变量 | 作用 |
 |----------|------|
-| `RADAR_PI_BASE` | 例如 **`http://10.162.133.43:5000`**（与本仓库默认树莓派 IP 一致），为空则不拉取雷达 JSON |
+| `RADAR_PI_BASE` | 例如 **`http://10.245.232.43:5000`**（与本仓库默认树莓派 IP 一致），为空则不拉取雷达 JSON |
 | `FUSION_DEPTH_SCENE_MIN_M` / `FUSION_DEPTH_SCENE_MAX_M` | 覆盖融合用的场景深度窗（米） |
 | `FUSION_USE_DEPTH_BIN_MATCH` | 设为 `0` 或 `false` 关闭深度–通道 id 匹配 |
 | `PHYSFORMER_ENABLED` | `0` 关闭 PhysFormer 心率 |

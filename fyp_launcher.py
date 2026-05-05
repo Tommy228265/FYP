@@ -10,7 +10,7 @@
 环境变量（可选）:
   RADAR_PI_BASE             树莓派 HTTP 根地址（雷达 + 可选摄像头流）
   USE_PI_CAMERA=1           视频从树莓派 /camera/rgb 拉流，本机不占用 RealSense
-  FYP_DEFAULT_RADAR_PI_BASE 覆盖内置默认树莓派地址（默认 http://10.162.133.43:5000）
+  FYP_DEFAULT_RADAR_PI_BASE 覆盖内置默认树莓派地址（默认 http://10.245.232.43:5000）
   FYP_LAUNCHER_PORT         默认 8787
   FYP_LAUNCHER_TOKEN        树莓派请求 /launch 时的 X-FYP-Token
   FYP_FACEAPP_CHECK         检测 face_app 是否就绪的 URL
@@ -34,7 +34,7 @@ TOKEN = os.environ.get("FYP_LAUNCHER_TOKEN", "").strip()
 FACE_APP_URL = os.environ.get("FYP_FACEAPP_CHECK", "http://127.0.0.1:5000/api/status")
 
 # 与树莓派 shumeipai 监听端口一致；换网络时可改环境变量 FYP_DEFAULT_RADAR_PI_BASE
-_BUILTIN_DEFAULT_RADAR = "http://10.162.133.43:5000"
+_BUILTIN_DEFAULT_RADAR = "http://10.245.232.43:5000"
 DEFAULT_RADAR_PI_BASE = (
     os.environ.get("FYP_DEFAULT_RADAR_PI_BASE") or _BUILTIN_DEFAULT_RADAR
 ).strip()

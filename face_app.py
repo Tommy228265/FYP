@@ -52,6 +52,15 @@ from config import (
     AGE_SMOOTHING_WINDOW,
     PHYSFORMER_ENABLED,
     PHYSFORMER_WEIGHTS,
+    VIDEO_MINIMAL_OVERLAY,
+    VIDEO_JPEG_QUALITY,
+    VIDEO_JPEG_DEPTH_QUALITY,
+    VIDEO_ENCODE_DEPTH_STREAM,
+    FACE_DEPTH_QUALITY_GATE,
+    RECOGNITION_LOCK_WINDOW_SEC,
+    RECOGNITION_LOCK_MAJORITY,
+    RECOGNITION_LOCK_MIN_VOTES,
+    AGE_LOCK_ON_CORRECT,
 )
 from age_estimator import AgeEstimator
 from face_identity import FaceEmbedder
@@ -100,7 +109,16 @@ last_recognition = {
     "score": 0.0,
     "is_known": False,
     "updated_at": 0.0,
+    "recognition_locked": False,
+    "locked_since": 0.0,
 }
+
+RECOGNITION_VOTE_BAD_LABELS = frozenset({"低质量人脸", "未知面容"})
+
+_recognition_vote_events: deque = deque()
+_recognition_locked = False
+_recognition_lock_snapshot: Optional[dict] = None
+_frozen_age_by_hist_key: Dict[str, dict] = {}
 
 PERSON_KEYS = [f"person{i}" for i in range(1, FACE_MAX_PROFILES + 1)]
 PERSON_LABELS = {person: f"人物{i}" for i, person in enumerate(PERSON_KEYS, start=1)}
@@ -401,10 +419,89 @@ def reset_recognition(label: str = "未识别"):
         "score": 0.0,
         "is_known": False,
         "updated_at": 0.0,
+        "recognition_locked": False,
+        "locked_since": 0.0,
     }
 
 
-def build_recognition_result(labels: List[str], scores: List[float], ages: List[dict]):
+def _clear_recognition_stability_locks():
+    """停止识别、重新开识别、录入等时清空投票与冻结状态。"""
+    global _recognition_locked, _recognition_lock_snapshot, _frozen_age_by_hist_key
+    _recognition_vote_events.clear()
+    _recognition_locked = False
+    _recognition_lock_snapshot = None
+    _frozen_age_by_hist_key.clear()
+
+
+def _depth_zone_ok_for_face_quality(dist_m: Any) -> bool:
+    """有有效深度读数时要求 optimal；无读数时不挡（Pi 纯 RGB 等）。"""
+    if not FACE_DEPTH_QUALITY_GATE:
+        return True
+    if dist_m is None:
+        return True
+    try:
+        fx = float(dist_m)
+    except (TypeError, ValueError):
+        return True
+    if not np.isfinite(fx):
+        return True
+    return (
+        depth_zone_label(
+            fx,
+            DEPTH_VITAL_OPTIMAL_MIN_M,
+            DEPTH_VITAL_OPTIMAL_MAX_M,
+        )
+        == "optimal"
+    )
+
+
+def _recognition_vote_tuple(labels: List[str]) -> Optional[tuple]:
+    if not labels or any(l in RECOGNITION_VOTE_BAD_LABELS for l in labels):
+        return None
+    return tuple(labels)
+
+
+def _maybe_advance_recognition_lock(
+    now: float,
+    labels: List[str],
+    scores: List[float],
+    ages: List[dict],
+) -> None:
+    """在识别模式下根据滑动窗口多数票决定是否锁定当前识别结果。"""
+    global _recognition_locked, _recognition_lock_snapshot
+    if _recognition_locked or RECOGNITION_LOCK_WINDOW_SEC <= 0:
+        return
+    key = _recognition_vote_tuple(labels)
+    if key is None:
+        return
+    _recognition_vote_events.append((now, key))
+    win = RECOGNITION_LOCK_WINDOW_SEC
+    while _recognition_vote_events and now - _recognition_vote_events[0][0] > win:
+        _recognition_vote_events.popleft()
+    window = [e for e in _recognition_vote_events if now - e[0] <= win]
+    if len(window) < RECOGNITION_LOCK_MIN_VOTES:
+        return
+    top_key, top_n = Counter(e[1] for e in window).most_common(1)[0]
+    if top_n / float(len(window)) < RECOGNITION_LOCK_MAJORITY:
+        return
+    if top_key != key:
+        return
+    ts = time.time()
+    built = build_recognition_result(labels, scores, ages)
+    built["recognition_locked"] = True
+    built["locked_since"] = ts
+    built["updated_at"] = ts
+    _recognition_locked = True
+    _recognition_lock_snapshot = built
+
+
+def build_recognition_result(
+    labels: List[str],
+    scores: List[float],
+    ages: List[dict],
+    recognition_locked: bool = False,
+    locked_since: float = 0.0,
+):
     if not labels:
         return reset_recognition("未识别")
 
@@ -424,8 +521,10 @@ def build_recognition_result(labels: List[str], scores: List[float], ages: List[
         "scores": [float(score) for score in scores],
         "ages": ages,
         "score": float(max(scores)) if scores else 0.0,
-        "is_known": any(label != "未知面容" for label in labels),
+        "is_known": any(l not in RECOGNITION_VOTE_BAD_LABELS for l in labels),
         "updated_at": time.time(),
+        "recognition_locked": bool(recognition_locked),
+        "locked_since": float(locked_since or 0.0),
     }
 
 
@@ -843,7 +942,7 @@ def start_camera():
         base = (RADAR_PI_BASE or "").strip().rstrip("/")
         if not base:
             raise SystemExit(
-                "USE_PI_CAMERA=1 需要设置环境变量 RADAR_PI_BASE（树莓派服务地址，如 http://10.162.133.43:5000）"
+                "USE_PI_CAMERA=1 需要设置环境变量 RADAR_PI_BASE（树莓派服务地址，如 http://10.245.232.43:5000）"
             )
         camera_backend = "pi_http"
         if _remote_cap is not None:
@@ -902,9 +1001,13 @@ def stop_camera():
 def frame_generator():
     global last_enroll_time, status_text, mode, enroll_person, last_recognition, last_vitals, last_vitals_fusion, last_depth_jpeg
     global last_live_preview, pending_enroll_display_name, _pi_depth_feed_ok
+    global _recognition_locked, _recognition_lock_snapshot
     embedder = get_embedder()
     age_estimator = get_age_estimator()
     pi_read_fail = 0
+    _jpg_rgb = [int(cv2.IMWRITE_JPEG_QUALITY), int(VIDEO_JPEG_QUALITY)]
+    _jpg_depth = [int(cv2.IMWRITE_JPEG_QUALITY), int(VIDEO_JPEG_DEPTH_QUALITY)]
+    _green = (0, 255, 0)
     while True:
         if camera_backend == "pi_http":
             cap = _ensure_pi_video_capture()
@@ -1055,6 +1158,16 @@ def frame_generator():
         recognition_ages = []
         live_preview_list: List[dict] = []
 
+        if local_mode != "recognize":
+            if _recognition_locked or _recognition_vote_events:
+                _clear_recognition_stability_locks()
+        elif len(face_items) == 0:
+            if _recognition_locked or _recognition_vote_events:
+                _clear_recognition_stability_locks()
+        elif _recognition_locked and _recognition_lock_snapshot is not None:
+            if len(face_items) != len(_recognition_lock_snapshot.get("labels", [])):
+                _clear_recognition_stability_locks()
+
         if local_mode == "enroll" and local_person in PERSON_KEYS and len(face_items) > 1:
             with state_lock:
                 status_text = "录入时检测到多张人脸，请保持画面中只有当前录入者"
@@ -1078,22 +1191,26 @@ def frame_generator():
             )
 
             if emb is None:
-                cv2.rectangle(frame, (x, y), (x2, y2), (128, 128, 128), 2)
-                cv2.putText(
-                    frame,
-                    "Face detected (align failed)",
-                    (x, max(y - 10, 20)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.55,
-                    (128, 128, 128),
-                    2,
-                )
+                if VIDEO_MINIMAL_OVERLAY:
+                    cv2.rectangle(frame, (x, y), (x2, y2), _green, 2)
+                else:
+                    cv2.rectangle(frame, (x, y), (x2, y2), (128, 128, 128), 2)
+                    cv2.putText(
+                        frame,
+                        "Face detected (align failed)",
+                        (x, max(y - 10, 20)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.55,
+                        (128, 128, 128),
+                        2,
+                    )
                 continue
 
             prob_value = prob if prob is not None else 0.0
+            depth_ok = _depth_zone_ok_for_face_quality(dist_m)
             quality_ok = prob_value >= FACE_MIN_MTCNN_PROB and (
                 FACE_MIN_BLUR_VARIANCE <= 0 or blur >= FACE_MIN_BLUR_VARIANCE
-            )
+            ) and depth_ok
 
             age_raw = None
             age_live = None
@@ -1103,14 +1220,23 @@ def frame_generator():
                 age_raw = apply_age_calibration(age_raw)
                 age_live = smooth_age_result(copy.deepcopy(age_raw), f"live_{face_index}")
 
-            pv = {
-                "slot": face_index + 1,
-                "quality_ok": quality_ok,
-                "age": _age_dict_for_api(age_live) if quality_ok and age_live else None,
-            }
-            if not quality_ok:
-                pv["reason"] = "low_quality"
-            live_preview_list.append(pv)
+            dm_api = None
+            dz_api = None
+            if dist_m is not None:
+                try:
+                    fx = float(dist_m)
+                    if np.isfinite(fx):
+                        dm_api = round(fx, 3)
+                        dz_api = depth_zone_label(
+                            fx,
+                            DEPTH_VITAL_OPTIMAL_MIN_M,
+                            DEPTH_VITAL_OPTIMAL_MAX_M,
+                        )
+                except (TypeError, ValueError):
+                    pass
+
+            preview_quality_ok = quality_ok
+            preview_age_result: Optional[dict] = age_live if quality_ok else None
 
             now = time.time()
 
@@ -1150,6 +1276,7 @@ def frame_generator():
                             pending_enroll_ages[local_person] = None
                             mode = "idle"
                             enroll_person = None
+                            _clear_recognition_stability_locks()
                 progress = len(enroll_buffers.get(local_person, []))
                 nm = local_pending_name or "未命名"
                 label = f"录入「{nm}」 {progress}/{ENROLL_SAMPLES_TARGET}"
@@ -1162,13 +1289,44 @@ def frame_generator():
                 else:
                     color = (0, 255, 255)
             elif local_mode == "recognize":
-                if quality_ok:
+                use_frozen = (
+                    _recognition_locked
+                    and _recognition_lock_snapshot is not None
+                    and len(face_items) == len(_recognition_lock_snapshot.get("labels", []))
+                    and face_index < len(_recognition_lock_snapshot["labels"])
+                )
+                if use_frozen:
+                    sl = _recognition_lock_snapshot
+                    display_name = str(sl["labels"][face_index])
+                    score = (
+                        float(sl["scores"][face_index])
+                        if face_index < len(sl["scores"])
+                        else 0.0
+                    )
+                    ag: dict = {}
+                    if face_index < len(sl["ages"]):
+                        ag = copy.deepcopy(sl["ages"][face_index])
+                    recognition_labels.append(display_name)
+                    recognition_scores.append(score)
+                    recognition_ages.append(ag)
+                    preview_quality_ok = True
+                    preview_age_result = ag if ag else None
+                    age_label = ag.get("label", "年龄未知")
+                    age_range = ag.get("range", "-")
+                    label = f"{display_name} {age_label}{age_range} sim:{score:.2f}"
+                    color = (0, 255, 0) if display_name != "未知面容" else (0, 0, 255)
+                elif quality_ok:
                     matched_person, name, score = classify_face_embedding(emb)
                     display_name = name if name != "Unknown" else "未知面容"
                     hist_key = matched_person if matched_person is not None else f"unknown_{face_index}"
                     if age_raw:
-                        age_result = smooth_age_result(copy.deepcopy(age_raw), hist_key)
-                        age_result = add_age_evaluation(age_result, matched_person)
+                        if AGE_LOCK_ON_CORRECT and hist_key in _frozen_age_by_hist_key:
+                            age_result = copy.deepcopy(_frozen_age_by_hist_key[hist_key])
+                        else:
+                            age_result = smooth_age_result(copy.deepcopy(age_raw), hist_key)
+                            age_result = add_age_evaluation(age_result, matched_person)
+                            if AGE_LOCK_ON_CORRECT and age_result.get("is_correct") is True:
+                                _frozen_age_by_hist_key[hist_key] = copy.deepcopy(age_result)
                     else:
                         age_result = {
                             "label": "无法估计",
@@ -1179,6 +1337,7 @@ def frame_generator():
                     recognition_labels.append(display_name)
                     recognition_scores.append(score)
                     recognition_ages.append(age_result)
+                    preview_age_result = age_result
                     age_label = age_result.get("label", "年龄未知")
                     age_range = age_result.get("range", "-")
                     label = f"{display_name} {age_label}{age_range} sim:{score:.2f}"
@@ -1189,6 +1348,8 @@ def frame_generator():
                     recognition_ages.append(
                         {"label": "无法估计", "label_en": "N/A", "range": "-", "confidence": 0.0}
                     )
+                    preview_quality_ok = False
+                    preview_age_result = None
                     label = f"Low quality p:{prob_value:.2f} blur:{blur:.0f}"
                     color = (0, 165, 255)
             else:
@@ -1203,6 +1364,17 @@ def frame_generator():
                         label += " · 需更清晰"
                     color = (200, 200, 0)
 
+            pv = {
+                "slot": face_index + 1,
+                "quality_ok": preview_quality_ok,
+                "age": _age_dict_for_api(preview_age_result) if preview_age_result else None,
+                "depth_m": dm_api,
+                "depth_zone": dz_api,
+            }
+            if not preview_quality_ok:
+                pv["reason"] = "low_quality"
+            live_preview_list.append(pv)
+
             if vitals_list and face_index < len(vitals_list):
                 vd = vitals_list[face_index]
                 hrv = vd.get("hr_bpm")
@@ -1215,48 +1387,65 @@ def frame_generator():
                 else:
                     label += f" | 心率 {prg}/{need}"
 
-            cv2.rectangle(frame, (x, y), (x2, y2), color, 3)
-            cv2.circle(frame, (x + bw // 2, y + bh // 2), 4, color, -1)
-            if not np.isnan(dist_m):
-                cv2.putText(
-                    frame,
-                    f"{dist_m:.2f} m",
-                    (x, min(y2 + 22, HEIGHT - 4)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.55,
-                    color,
-                    2,
-                )
-
-            draw_label(frame, label, x, y, color)
+            if VIDEO_MINIMAL_OVERLAY:
+                cv2.rectangle(frame, (x, y), (x2, y2), _green, 2)
+            else:
+                cv2.rectangle(frame, (x, y), (x2, y2), color, 3)
+                cv2.circle(frame, (x + bw // 2, y + bh // 2), 4, color, -1)
+                if not np.isnan(dist_m):
+                    cv2.putText(
+                        frame,
+                        f"{dist_m:.2f} m",
+                        (x, min(y2 + 22, HEIGHT - 4)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.55,
+                        color,
+                        2,
+                    )
+                draw_label(frame, label, x, y, color)
 
         with state_lock:
             last_live_preview = {"faces": live_preview_list, "updated_at": time.time()}
 
         if local_mode == "recognize" and recognition_labels:
-            with state_lock:
-                last_recognition = build_recognition_result(
+            now_rec = time.time()
+            if not _recognition_locked:
+                _maybe_advance_recognition_lock(
+                    now_rec,
                     recognition_labels,
                     recognition_scores,
                     recognition_ages,
                 )
-                status_text = last_recognition["summary"]
+            with state_lock:
+                if _recognition_locked and _recognition_lock_snapshot is not None:
+                    snap = copy.deepcopy(_recognition_lock_snapshot)
+                    snap["updated_at"] = now_rec
+                    last_recognition = snap
+                    status_text = snap["summary"]
+                else:
+                    last_recognition = build_recognition_result(
+                        recognition_labels,
+                        recognition_scores,
+                        recognition_ages,
+                    )
+                    status_text = last_recognition["summary"]
 
-        with state_lock:
-            draw_status_panel(
-                frame,
-                mode,
-                status_text,
-                sum(1 for profile in profiles.values() if profile is not None),
-            )
-            recent = time.time() - last_recognition["updated_at"] <= 3.0
-            if mode == "recognize" and recent:
-                draw_recognition_banner(
+        if not VIDEO_MINIMAL_OVERLAY:
+            with state_lock:
+                draw_status_panel(
                     frame,
-                    last_recognition["labels"],
-                    last_recognition["scores"],
-                    last_recognition["ages"],
+                    mode,
+                    status_text,
+                    sum(1 for profile in profiles.values() if profile is not None),
                 )
+                recent = time.time() - last_recognition["updated_at"] <= 3.0
+                if mode == "recognize" and recent:
+                    draw_recognition_banner(
+                        frame,
+                        last_recognition["labels"],
+                        last_recognition["scores"],
+                        last_recognition["ages"],
+                    )
 
         if camera_backend == "pi_http":
             got_pi_depth = False
@@ -1279,13 +1468,14 @@ def frame_generator():
             else:
                 depth_vis = _make_pi_depth_placeholder_bgr()
             _pi_depth_feed_ok = got_pi_depth
+            dc = (0, 255, 0) if VIDEO_MINIMAL_OVERLAY else (0, 255, 100)
             for _emb, _pr, _bl, bbox in face_items:
                 fx, fy, fw, fh = bbox
                 cv2.rectangle(
                     depth_vis,
                     (int(fx), int(fy)),
                     (int(fx + fw), int(fy + fh)),
-                    (0, 255, 100),
+                    dc,
                     2,
                 )
         else:
@@ -1293,21 +1483,23 @@ def frame_generator():
                 cv2.convertScaleAbs(depth_image, alpha=DEPTH_VIS_ALPHA),
                 cv2.COLORMAP_TURBO,
             )
+            dc = (0, 255, 0) if VIDEO_MINIMAL_OVERLAY else (0, 255, 100)
             for _emb, _pr, _bl, bbox in face_items:
                 fx, fy, fw, fh = bbox
                 cv2.rectangle(
                     depth_vis,
                     (int(fx), int(fy)),
                     (int(fx + fw), int(fy + fh)),
-                    (0, 255, 100),
+                    dc,
                     2,
                 )
-        ok_depth, jpg_depth = cv2.imencode(".jpg", depth_vis)
-        if ok_depth:
-            with state_lock:
-                last_depth_jpeg = jpg_depth.tobytes()
+        if VIDEO_ENCODE_DEPTH_STREAM:
+            ok_depth, jpg_depth = cv2.imencode(".jpg", depth_vis, _jpg_depth)
+            if ok_depth:
+                with state_lock:
+                    last_depth_jpeg = jpg_depth.tobytes()
 
-        ok, jpg = cv2.imencode(".jpg", frame)
+        ok, jpg = cv2.imencode(".jpg", frame, _jpg_rgb)
         if not ok:
             continue
         chunk = jpg.tobytes()
@@ -1450,6 +1642,7 @@ def api_enroll_start():
         enroll_person = person
         pending_enroll_display_name = display_nm
         age_prediction_histories.clear()
+        _clear_recognition_stability_locks()
         enroll_buffers[person] = []
         pending_enroll_ages[person] = actual_age
         last_enroll_time = 0.0
@@ -1468,6 +1661,7 @@ def api_recognize_start():
             return jsonify({"ok": False, "error": "请至少完成 1 个面容录入"}), 400
         mode = "recognize"
         age_prediction_histories.clear()
+        _clear_recognition_stability_locks()
         last_recognition = reset_recognition("等待识别")
         status_text = f"识别模式运行中，当前已录入 {ready_count}/{FACE_MAX_PROFILES} 个面容"
     return jsonify({"ok": True})
@@ -1491,6 +1685,7 @@ def api_profile_delete():
         if enroll_person == person:
             enroll_person = None
             mode = "idle"
+        _clear_recognition_stability_locks()
         last_recognition = reset_recognition("未识别")
         save_profiles()
         save_profile_meta()
@@ -1505,6 +1700,7 @@ def api_stop():
         mode = "idle"
         enroll_person = None
         age_prediction_histories.clear()
+        _clear_recognition_stability_locks()
         last_recognition = reset_recognition("未识别")
         status_text = "已停止，等待操作"
     return jsonify({"ok": True})

@@ -13,9 +13,12 @@
   FYP_CAMERA_DEVICE=          非空时直接打开该 V4L2 设备（如 /dev/video2），优先于索引
   FYP_CAMERA_PROBE=1          为 0 时禁用自动探测 /dev/video*（仅用 INDEX）
   FYP_REALSENSE_COLOR_ONLY=0  为 1 时跳过深度流（USB2/省电场景可试）
-  FYP_PC_HOST=10.162.133.140
+  FYP_PC_HOST=10.245.232.140
   FYP_UI_URL / FYP_LAUNCHER_URL   未单独设置时由 FYP_PC_HOST 自动拼出
   FYP_LAUNCHER_TOKEN   FYP_OPEN_KIOSK=1   FYP_AUTO_START=1   FYP_SERIAL=/dev/ttyUSB0
+  FYP_MJPEG_QUALITY=72   FYP_MJPEG_FPS=28   （推流 JPEG 质量 / 浏览器端拉流目标帧率上限）
+  RADAR_ADAPTIVE_BREATH_NOTCH=1   心率带内按当前估计呼吸频率抑制 k 次谐波（减轻 HR 系统性偏高）
+  RADAR_BREATH_NOTCH_Q=28         谐波陷波 Q 值（越大越窄，过大可能数值不稳）
 """
 
 import glob
@@ -41,7 +44,7 @@ try:
 except Exception:
     pass
 
-_DEFAULT_PC_HOST = "10.162.133.140"
+_DEFAULT_PC_HOST = "10.245.232.140"
 _PC_HOST = (os.environ.get("FYP_PC_HOST") or "").strip() or _DEFAULT_PC_HOST
 if _PC_HOST:
     if not (os.environ.get("FYP_UI_URL") or "").strip():
@@ -66,6 +69,10 @@ FYP_CAMERA_INDEX = int(os.environ.get("FYP_CAMERA_INDEX", "0"))
 FYP_CAMERA_WIDTH = int(os.environ.get("FYP_CAMERA_WIDTH", "640"))
 FYP_CAMERA_HEIGHT = int(os.environ.get("FYP_CAMERA_HEIGHT", "480"))
 FYP_CAMERA_FPS = int(os.environ.get("FYP_CAMERA_FPS", "30"))
+# MJPEG 推流：略降 JPEG 质量可减轻 Wi‑Fi 带宽与上位机解码耗时；提高 FPS 上限使流更跟手
+FYP_MJPEG_QUALITY = max(40, min(95, int(os.environ.get("FYP_MJPEG_QUALITY", "72"))))
+FYP_MJPEG_FPS = max(8.0, min(60.0, float(os.environ.get("FYP_MJPEG_FPS", "28"))))
+_FYP_JPEG_ENC = [int(cv2.IMWRITE_JPEG_QUALITY), FYP_MJPEG_QUALITY]
 # auto | realsense | uvc — 与 jianjie.py 一致时 D435 用 realsense，不是 /dev/video0
 FYP_CAMERA_MODE = (os.environ.get("FYP_CAMERA_MODE") or "auto").strip().lower()
 
@@ -97,7 +104,7 @@ def _jpeg_placeholder_no_camera():
         1,
         cv2.LINE_AA,
     )
-    ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 78])
+    ok, buf = cv2.imencode(".jpg", img, _FYP_JPEG_ENC)
     return buf.tobytes() if ok else None
 
 
@@ -145,7 +152,7 @@ def _jpeg_depth_na():
         1,
         cv2.LINE_AA,
     )
-    ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 76])
+    ok, buf = cv2.imencode(".jpg", img, _FYP_JPEG_ENC)
     _DEPTH_NA_JPEG_CACHE = buf.tobytes() if ok else None
     return _DEPTH_NA_JPEG_CACHE
 
@@ -238,9 +245,7 @@ def _uvc_camera_loop():
         if ok:
             if frame.shape[1] != FYP_CAMERA_WIDTH or frame.shape[0] != FYP_CAMERA_HEIGHT:
                 frame = cv2.resize(frame, (FYP_CAMERA_WIDTH, FYP_CAMERA_HEIGHT))
-            ok_j, buf = cv2.imencode(
-                ".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 82]
-            )
+            ok_j, buf = cv2.imencode(".jpg", frame, _FYP_JPEG_ENC)
             if ok_j:
                 with _cam_lock:
                     _latest_jpeg = buf.tobytes()
@@ -339,7 +344,7 @@ def _realsense_camera_loop():
         frame = np.asanyarray(color_frame.get_data())
         if frame.shape[1] != w or frame.shape[0] != h:
             frame = cv2.resize(frame, (w, h))
-        ok_j, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
+        ok_j, buf = cv2.imencode(".jpg", frame, _FYP_JPEG_ENC)
         if not ok_j:
             continue
         depth_frame = frames.get_depth_frame()
@@ -350,11 +355,7 @@ def _realsense_camera_loop():
                 if dimg.shape[1] != w or dimg.shape[0] != h:
                     dimg = cv2.resize(dimg, (w, h))
                 depth_vis = _depth_uint16_to_colormap_bgr(dimg)
-                ok_d, buf_d = cv2.imencode(
-                    ".jpg",
-                    depth_vis,
-                    [int(cv2.IMWRITE_JPEG_QUALITY), 82],
-                )
+                ok_d, buf_d = cv2.imencode(".jpg", depth_vis, _FYP_JPEG_ENC)
                 _latest_depth_jpeg = buf_d.tobytes() if ok_d else None
             else:
                 _latest_depth_jpeg = None
@@ -410,7 +411,7 @@ def camera_mjpeg_generator():
                 + chunk
                 + b"\r\n"
             )
-        time.sleep(1.0 / 24.0)
+        time.sleep(1.0 / FYP_MJPEG_FPS)
 
 
 def camera_depth_mjpeg_generator():
@@ -426,7 +427,7 @@ def camera_depth_mjpeg_generator():
                 + out
                 + b"\r\n"
             )
-        time.sleep(1.0 / 24.0)
+        time.sleep(1.0 / FYP_MJPEG_FPS)
 
 
 @app.route("/camera/rgb")
@@ -555,6 +556,10 @@ class BreathingHeartSystem:
         self._br_raw_window = deque(maxlen=7)
         self._hr_raw_window = deque(maxlen=7)
         self.time_history = deque(maxlen=self.window_size)
+        self._radar_adaptive_breath_notch = os.environ.get(
+            "RADAR_ADAPTIVE_BREATH_NOTCH", "1"
+        ).strip().lower() not in ("0", "false", "no")
+        self._radar_breath_notch_q = max(8.0, float(os.environ.get("RADAR_BREATH_NOTCH_Q", "28")))
 
         self.breathing_rate = 0.0
         self.breathing_amplitude = 0.0
@@ -672,6 +677,29 @@ class BreathingHeartSystem:
             breathing_rate, breathing_amplitude = self.detect_frequency_in_range(
                 breathing_filtered, 0.1, 0.5
             )
+
+            # 呼吸谐波常落在 1–2.5 Hz（与心率带重叠），仅靠固定 0.2/0.4Hz 陷波不够；按当前呼吸基频抑制 k 次谐波后再估 HR。
+            if (
+                self._radar_adaptive_breath_notch
+                and breathing_rate > 5.0
+                and b_heart is not None
+            ):
+                f_br_hz = breathing_rate / 60.0
+                nyquist = self.sample_rate / 2
+                for k in range(2, 11):
+                    fh = f_br_hz * float(k)
+                    if fh < 1.0 or fh > 2.48:
+                        continue
+                    notch_norm = fh / nyquist
+                    if 0.03 < notch_norm < 0.97:
+                        try:
+                            b_n, a_n = signal.iirnotch(
+                                notch_norm, Q=self._radar_breath_notch_q
+                            )
+                            heart_filtered = self.safe_filtfilt(b_n, a_n, heart_filtered)
+                        except Exception:
+                            continue
+
             heart_rate, heart_amplitude = self.detect_frequency_in_range(
                 heart_filtered, 1.0, 2.5
             )
@@ -1157,7 +1185,7 @@ def stop_radar():
 
 if __name__ == "__main__":
     print("树莓派采集服务监听 %s:%s" % (HTTP_HOST, HTTP_PORT))
-    print("上位机示例：RADAR_PI_BASE=http://10.162.133.43:%s（换网段请改 IP）" % HTTP_PORT)
+    print("上位机示例：RADAR_PI_BASE=http://10.245.232.43:%s（换网段请改 IP）" % HTTP_PORT)
     print("若摄像头插在树莓派：上位机设 USE_PI_CAMERA=1（并确保本机已开启摄像头采集）")
     start_pi_camera_thread()
     if os.environ.get("FYP_AUTO_START", "1") == "1":
